@@ -40,8 +40,10 @@ struct Options {
     std::string labels = "model/coco_80_labels_list.txt";
     std::string action_hook = "scripts/action_hook.sh";
     std::string tmp_dir = "/tmp/agent-butler";
+    std::string snapshot_path = "/tmp/home_state.json";
     int port = 9000;
     int max_jpeg_bytes = 20 * 1024 * 1024;
+    bool emit_events = false;
 };
 
 struct FrameHeader {
@@ -58,7 +60,17 @@ struct BraceletData {
     int64_t timestamp_ms = 0;
 };
 
+// 单个房间的最新检测状态（全屋快照的基本单元）
+struct RoomState {
+    bool has_person = false;
+    bool has_cat = false;
+    bool has_dog = false;
+    bool fall_like = false;
+};
+
 struct RuleState {
+    // 全屋状态表：room -> 最新检测结果（每帧更新对应房间）
+    std::map<std::string, RoomState> home_state;
     int kitchen_pet_without_person_streak = 0;
     std::map<std::string, int> fall_streak_by_room;
     int health_abnormal_streak = 0;
@@ -80,7 +92,8 @@ static int64_t now_ms()
 
 static void print_usage(const char *prog)
 {
-    printf("%s [--det-model path] [--pose-model path] [--labels path] [--port n] [--action-hook path]\n", prog);
+    printf("%s [--det-model path] [--pose-model path] [--labels path] [--port n] "
+           "[--action-hook path] [--tmp-dir path] [--snapshot path] [--emit-events]\n", prog);
 }
 
 static bool parse_args(int argc, char **argv, Options *opts)
@@ -90,6 +103,10 @@ static bool parse_args(int argc, char **argv, Options *opts)
         if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
             return false;
+        }
+        if (arg == "--emit-events") {
+            opts->emit_events = true;
+            continue;
         }
         if (i + 1 >= argc) {
             printf("missing value for %s\n", arg.c_str());
@@ -108,6 +125,8 @@ static bool parse_args(int argc, char **argv, Options *opts)
             opts->action_hook = value;
         } else if (arg == "--tmp-dir") {
             opts->tmp_dir = value;
+        } else if (arg == "--snapshot") {
+            opts->snapshot_path = value;
         } else {
             printf("unknown option: %s\n", arg.c_str());
             return false;
@@ -311,6 +330,45 @@ static std::string detections_json(const det_object_detect_result_list &results)
     }
     os << "]";
     return os.str();
+}
+
+// 五个房间的固定顺序（全屋快照按此顺序输出）
+static const char *kRooms[] = {"living_room", "bedroom1", "bedroom2", "kitchen", "bathroom"};
+
+static void write_snapshot(const Options &opts, const RuleState &state, int64_t ts_ms)
+{
+    std::ostringstream os;
+    os << "{\"timestamp_ms\":" << ts_ms << ",\"rooms\":{";
+    for (size_t i = 0; i < sizeof(kRooms) / sizeof(kRooms[0]); ++i) {
+        if (i > 0) {
+            os << ",";
+        }
+        RoomState r;
+        std::map<std::string, RoomState>::const_iterator it = state.home_state.find(kRooms[i]);
+        if (it != state.home_state.end()) {
+            r = it->second;
+        }
+        os << "\"" << kRooms[i] << "\":{"
+           << "\"has_person\":" << (r.has_person ? "true" : "false") << ","
+           << "\"has_cat\":" << (r.has_cat ? "true" : "false") << ","
+           << "\"has_dog\":" << (r.has_dog ? "true" : "false") << ","
+           << "\"fall_like\":" << (r.fall_like ? "true" : "false") << "}";
+    }
+    os << "}}";
+
+    // 原子写：先写 .tmp，再 rename，避免读方读到半截
+    std::string path = opts.snapshot_path;
+    std::string tmp = path + ".tmp";
+    FILE *fp = fopen(tmp.c_str(), "w");
+    if (!fp) {
+        printf("write_snapshot open failed: %s\n", strerror(errno));
+        return;
+    }
+    fwrite(os.str().c_str(), 1, os.str().size(), fp);
+    fclose(fp);
+    if (rename(tmp.c_str(), path.c_str()) != 0) {
+        printf("write_snapshot rename failed: %s\n", strerror(errno));
+    }
 }
 
 static std::string bracelet_json(const BraceletData &bracelet)
@@ -566,7 +624,21 @@ static int process_frame(const Options &opts,
         }
     }
 
-    evaluate_rules(opts, state, header, det_results, pose_ptr);
+    // 更新全屋状态表：本帧检测结果写入对应房间
+    RoomState &room_state = state->home_state[header.room];
+    room_state.has_person = has_detection_label(det_results, "person");
+    room_state.has_cat = has_detection_label(det_results, "cat");
+    room_state.has_dog = has_detection_label(det_results, "dog");
+    room_state.fall_like = pose_ptr ? any_fall_like_person(*pose_ptr) : false;
+
+    // 输出全屋快照（供云端 Agent 读取）
+    int64_t ts_ms = header.timestamp_ms > 0 ? header.timestamp_ms : now_ms();
+    write_snapshot(opts, *state, ts_ms);
+
+    // 原有硬编码规则默认关闭，需要时用 --emit-events 打开
+    if (opts.emit_events) {
+        evaluate_rules(opts, state, header, det_results, pose_ptr);
+    }
 
     if (image.virt_addr) {
         free(image.virt_addr);

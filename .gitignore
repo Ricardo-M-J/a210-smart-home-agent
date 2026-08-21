@@ -20,3 +20,6 @@ home_state.json
 # 队友的模型文件与编译产物（二进制大文件）
 *.torq
 yolo/agent-butler_K_copy_20260821/install/
+
+# 内部接手文档（早期探索/已废弃思路，不对外）
+a210-handoff.md

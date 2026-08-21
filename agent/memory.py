@@ -58,8 +58,10 @@ class Memory:
                 CREATE TABLE IF NOT EXISTS rules (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     time TEXT NOT NULL,
-                    rule_type TEXT NOT NULL,
                     description TEXT,
+                    when_json TEXT,
+                    action TEXT DEFAULT 'alert',
+                    requires_mode TEXT,
                     active INTEGER DEFAULT 1
                 );
                 CREATE TABLE IF NOT EXISTS settings (
@@ -93,12 +95,15 @@ class Memory:
 
     # ---- 监控规则 ----
 
-    def add_rule(self, rule_type: str, description: str) -> int:
-        """新增一条监控规则，返回规则 id。"""
+    def add_rule(self, description: str, when: dict, action: str = "alert", requires_mode: str | None = None) -> int:
+        """新增一条监控规则，返回规则 id。when 是条件字典（存 JSON）。"""
+        import json
+
         with self._conn() as conn:
             cur = conn.execute(
-                "INSERT INTO rules (time, rule_type, description, active) VALUES (?, ?, ?, 1)",
-                (now_str(), rule_type, description),
+                "INSERT INTO rules (time, description, when_json, action, requires_mode, active) "
+                "VALUES (?, ?, ?, ?, ?, 1)",
+                (now_str(), description, json.dumps(when, ensure_ascii=False), action, requires_mode),
             )
             return cur.lastrowid
 
@@ -111,14 +116,24 @@ class Memory:
             return cur.rowcount > 0
 
     def list_rules(self, active_only: bool = True) -> list[dict]:
-        """列出规则。active_only=True 只返回启用中的。"""
+        """列出规则，when_json 解析成 when 字典。active_only=True 只返回启用中的。"""
+        import json
+
         sql = "SELECT * FROM rules"
         if active_only:
             sql += " WHERE active = 1"
         sql += " ORDER BY id DESC"
         with self._conn() as conn:
             rows = conn.execute(sql).fetchall()
-        return [dict(r) for r in rows]
+        result = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["when"] = json.loads(d.pop("when_json", "{}") or "{}")
+            except (json.JSONDecodeError, TypeError):
+                d["when"] = {}
+            result.append(d)
+        return result
 
     # ---- 全局键值状态 ----
 

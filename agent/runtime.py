@@ -57,7 +57,7 @@ class EventMonitor(threading.Thread):
     def _handle_event(event: dict) -> None:
         # 落库疑似事件（severity 标记为 suspicious，最终是否告警由 LLM 二次判断）
         Memory().log_event({
-            "event_type": event.get("rule_type"),
+            "event_type": "rule_match",
             "key": event.get("room"),
             "severity": "suspicious",
             "summary": event.get("summary"),

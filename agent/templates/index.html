@@ -182,35 +182,32 @@
     question.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
 
     // 状态面板
+    const roomCn = {living_room:'客厅', bedroom1:'卧室1', bedroom2:'卧室2', kitchen:'厨房', bathroom:'卫生间'};
     function renderState(s) {
       if (!s || s.error) { stateBody.textContent = s.error || '暂无数据'; return; }
       stateBody.innerHTML = '';
       const time = document.createElement('div');
       time.style.color = 'var(--muted)';
       time.style.marginBottom = '8px';
-      time.textContent = '快照时间：' + (s.timestamp || '-');
+      time.textContent = '快照时间：' + (s.timestamp_ms ? new Date(s.timestamp_ms).toLocaleString() : '-');
       stateBody.appendChild(time);
-      for (const room of (s.rooms || [])) {
+      const rooms = s.rooms || {};
+      for (const [name, r] of Object.entries(rooms)) {
         const rd = document.createElement('div');
         rd.className = 'room';
         const rn = document.createElement('div');
         rn.className = 'room-name';
-        rn.textContent = room.room;
+        rn.textContent = roomCn[name] || name;
         rd.appendChild(rn);
-        for (const o of (room.objects || [])) {
-          const od = document.createElement('div');
-          od.className = 'obj';
-          const k = document.createElement('span');
-          k.textContent = o.category;
-          const v = document.createElement('span');
-          v.className = 'val';
-          v.textContent = o.category === 'person' ? `人数 ${o.count} / ${o.pose || '-'}`
-            : o.category === 'light' ? o.state
-            : o.category === 'pet' ? `数量 ${o.count}`
-            : `${o.name} ${o.state}`;
-          od.appendChild(k); od.appendChild(v);
-          rd.appendChild(od);
-        }
+        const sigs = [];
+        if (r.has_person) sigs.push('有人');
+        if (r.has_cat) sigs.push('有猫');
+        if (r.has_dog) sigs.push('有狗');
+        if (r.fall_like) sigs.push('疑似跌倒');
+        const v = document.createElement('div');
+        v.className = 'val';
+        v.textContent = sigs.length ? sigs.join(' · ') : '无异常';
+        rd.appendChild(v);
         stateBody.appendChild(rd);
       }
     }

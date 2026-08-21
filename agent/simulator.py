@@ -19,7 +19,7 @@ from mock import SCENARIOS, write_scene
 class PerceptionSimulator(threading.Thread):
     """后台线程：周期性把当前场景写入快照文件，模拟感知层持续输出。"""
 
-    def __init__(self, scene: str = "day_nobody_off", interval: float = 1.0):
+    def __init__(self, scene: str = "day_normal", interval: float = 1.0):
         super().__init__(daemon=True)
         self.scene = scene
         self.interval = interval

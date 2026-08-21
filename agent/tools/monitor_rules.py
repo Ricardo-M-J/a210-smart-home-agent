@@ -1,33 +1,58 @@
 """监控规则 Tool：把用户自然语言指令登记为持续监控规则。
 
-用户说「我离开家了，有人进来就报警」→ Agent 判断意图 → 调 add_monitor_rule
-把规则存入 rules 表 → 事件引擎后台按规则表持续检测。
+用户说「厨房有猫没人就报警」→ Agent 把它解析成条件字典（when）→ add_monitor_rule
+把规则存入 rules 表 → 事件引擎后台用通用匹配持续检测。
 
-这三个 Tool 让「下指令 → 持续监控」闭环成立，规则可增删，不再硬编码。
+规则不是预设枚举，而是 LLM 从用户指令动态生成的条件字典，这是 Agent 自主性的核心。
 """
-from event_engine import RULE_TYPES
+from event_engine import ROOM_CN, ROOM_FIELDS
+
+_ROOMS = list(ROOM_CN.keys())
 
 ADD_SPEC = {
     "type": "function",
     "function": {
         "name": "add_monitor_rule",
         "description": "登记一条持续监控规则。当用户说'如果发生X就报警/提醒我'这类持续监控需求时调用。"
-                       f"rule_type 只能从以下选：{list(RULE_TYPES.keys())}，含义分别为：{RULE_TYPES}。"
-                       "description 记录用户的原始诉求。",
+                       "把用户的诉求解析成触发条件 when。",
         "parameters": {
             "type": "object",
             "properties": {
-                "rule_type": {
-                    "type": "string",
-                    "enum": list(RULE_TYPES.keys()),
-                    "description": "监控规则类型枚举",
-                },
                 "description": {
                     "type": "string",
                     "description": "用户原始诉求的自然语言描述",
                 },
+                "when": {
+                    "type": "object",
+                    "description": "触发条件字典，字段之间是 AND 关系，省略的字段表示不限制。"
+                                   "可选字段：room(房间名，枚举：living_room/bedroom1/bedroom2/kitchen/bathroom)、"
+                                   "has_person(是否有人)、has_cat(是否有猫)、has_dog(是否有狗)、"
+                                   "fall_like(是否像跌倒)、is_night(是否夜间)。"
+                                   "例：厨房有猫且无人 → {\"room\":\"kitchen\",\"has_cat\":true,\"has_person\":false}；"
+                                   "有人跌倒 → {\"fall_like\":true}；"
+                                   "夜里有人进入 → {\"has_person\":true,\"is_night\":true}",
+                    "properties": {
+                        "room": {"type": "string", "enum": _ROOMS, "description": "指定房间，省略则匹配任意房间"},
+                        "has_person": {"type": "boolean", "description": "是否检测到人"},
+                        "has_cat": {"type": "boolean", "description": "是否检测到猫"},
+                        "has_dog": {"type": "boolean", "description": "是否检测到狗"},
+                        "fall_like": {"type": "boolean", "description": "是否像跌倒"},
+                        "is_night": {"type": "boolean", "description": "是否夜间（22:00-06:00）"},
+                    },
+                },
+                "action": {
+                    "type": "string",
+                    "enum": ["alert", "log"],
+                    "description": "命中后动作：alert=告警；log=仅记录",
+                },
+                "requires_mode": {
+                    "type": "string",
+                    "enum": ["home", "away"],
+                    "description": "可选：该规则仅在指定模式（home/away）下生效。"
+                                   "如'有人进入报警'通常需要 away 模式（离家时才检测有人进入）。",
+                },
             },
-            "required": ["rule_type", "description"],
+            "required": ["description", "when"],
         },
     },
 }
@@ -60,8 +85,7 @@ MODE_SPEC = {
     "type": "function",
     "function": {
         "name": "set_home_mode",
-        "description": "设置在家/离家模式。用户说'我出门了/我离开家了'→away；说'我回来了/我到家了'→home。"
-                       "离家模式下 person_enter 等规则才会生效，在家模式下不检测人员进入。",
+        "description": "设置在家/离家模式。用户说'我出门了/我离开家了'→away；说'我回来了/我到家了'→home。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -88,18 +112,26 @@ GET_MODE_SPEC = {
 RULE_SPECS = [ADD_SPEC, LIST_SPEC, REMOVE_SPEC, MODE_SPEC, GET_MODE_SPEC]
 
 
-def add_monitor_rule(rule_type: str, description: str) -> dict:
-    """登记监控规则。"""
+def add_monitor_rule(description: str, when: dict, action: str = "alert", requires_mode: str | None = None) -> dict:
+    """登记监控规则。when 是条件字典，由 LLM 从用户指令生成。"""
     from memory import Memory
 
-    if rule_type not in RULE_TYPES:
-        return {"status": "error", "detail": f"未知规则类型: {rule_type}，可选 {list(RULE_TYPES.keys())}"}
-    rule_id = Memory().add_rule(rule_type, description)
+    if not isinstance(when, dict) or not when:
+        return {"status": "error", "detail": "when 条件不能为空"}
+    # 校验 when 字段合法
+    allowed = set(ROOM_FIELDS) | {"room", "is_night"}
+    unknown = set(when) - allowed
+    if unknown:
+        return {"status": "error", "detail": f"未知条件字段: {unknown}，可选 {sorted(allowed)}"}
+
+    rule_id = Memory().add_rule(description, when, action, requires_mode)
     return {
         "status": "ok",
         "rule_id": rule_id,
-        "rule_type": rule_type,
         "description": description,
+        "when": when,
+        "action": action,
+        "requires_mode": requires_mode,
         "note": "监控规则已生效，后台将持续检测",
     }
 
@@ -132,7 +164,7 @@ def set_home_mode(mode: str) -> dict:
     return {
         "status": "ok",
         "mode": mode,
-        "note": "已切换到离家模式，人员进入类规则已武装" if mode == "away" else "已切换到在家模式，人员进入类规则已解除武装",
+        "note": "已切换到离家模式" if mode == "away" else "已切换到在家模式",
     }
 
 

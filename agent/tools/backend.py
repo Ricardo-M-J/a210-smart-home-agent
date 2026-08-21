@@ -53,35 +53,44 @@ class MockBackend(Backend):
         state = self._state()
         if "error" in state:
             return {"status": "error", "detail": state["error"]}
-        detections = []
-        for room in state.get("rooms", []):
-            for obj in room.get("objects", []):
-                detections.append({"room": room["room"], **obj})
         return {
             "status": "ok",
-            "timestamp": state.get("timestamp"),
-            "detections": detections,
+            "timestamp_ms": state.get("timestamp_ms"),
+            "rooms": state.get("rooms", {}),
             "note": "Mock 模式：无真实 YOLO，以快照代表检测结果",
         }
 
 
 class RealBackend(Backend):
-    """真实后端：上板后调用队友封装的采集/推理接口。
+    """真实后端：上板后读队友 C++ 写的全屋快照文件。
 
-    TODO（等队友接口冻结后填充）：
-        capture()       -> 调用队友摄像头采集模块，返回真实一帧
-        latest_frame()  -> 读摄像头最新缓存帧
-        infer()         -> 调用队友 YOLO 推理接口，返回真实检测结果
+    capture/latest_frame/infer 都读 HOME_STATE_FILE（队友原子写 /tmp/home_state.json）。
+    Mock 和 Real 的差异只在快照来源：Mock 是本地模拟器写，Real 是队友 C++ 写。
     """
 
+    @staticmethod
+    def _state() -> dict:
+        from tools.reader import read_home_state
+        return read_home_state()
+
     def capture(self) -> dict:
-        raise NotImplementedError("待接队友采集接口")
+        state = self._state()
+        if "error" in state:
+            return {"status": "error", "detail": state["error"]}
+        return {"status": "ok", "frame_id": f"frame@{state.get('timestamp_ms', 'unknown')}"}
 
     def latest_frame(self) -> dict:
-        raise NotImplementedError("待接队友采集接口")
+        return self.capture()
 
     def infer(self) -> dict:
-        raise NotImplementedError("待接队友推理接口")
+        state = self._state()
+        if "error" in state:
+            return {"status": "error", "detail": state["error"]}
+        return {
+            "status": "ok",
+            "timestamp_ms": state.get("timestamp_ms"),
+            "rooms": state.get("rooms", {}),
+        }
 
 
 def get_backend() -> Backend:

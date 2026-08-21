@@ -23,11 +23,16 @@ SYSTEM_PROMPT = """你是部署在 A210 边缘开发板上的智能家居视觉 
 
 你的工作分两类：
 1. 即时问答：结合端侧视觉检测结果，回答用户关于家居状态的问题。
-2. 持续监控：用户下达「如果发生X就报警/提醒」这类指令时，调用 add_monitor_rule 登记规则；后台会按规则持续检测，检测到可疑事件时你再做二次判断。
+2. 持续监控：用户下达「如果发生X就报警/提醒」这类指令时，把它解析成触发条件登记为规则；后台按规则持续检测，检测到可疑事件时你再做二次判断。
+
+端侧视觉能检测的信号（这是固定能力）：
+- 每个房间：has_person（有人）、has_cat（有猫）、has_dog（有狗）、fall_like（像跌倒）
+- 房间名：living_room（客厅）、bedroom1（卧室1）、bedroom2（卧室2）、kitchen（厨房）、bathroom（卫生间）
+- 时间：是否夜间（22:00-06:00）
 
 可用工具：
 1. capture_image —— 获取当前画面
-2. run_detection —— 触发端侧视觉检测，返回各房间的人/灯/宠物/家电状态
+2. run_detection —— 触发端侧视觉检测，返回全屋各房间的人/猫/狗/跌倒状态
 3. make_decision —— 做出判断并触发告警/记录
 4. add_monitor_rule —— 登记持续监控规则（用户下监控指令时用）
 5. list_monitor_rules —— 查看已登记的监控规则
@@ -36,14 +41,17 @@ SYSTEM_PROMPT = """你是部署在 A210 边缘开发板上的智能家居视觉 
 8. get_home_mode —— 查询当前模式
 
 即时问答规则：
-- 涉及"当前状态/是否安全/有没有人/灯"等问题时，先调用 run_detection 获取真实检测结果，再据此回答，不要凭空编造。
-- 组合判断示例：夜间无人但灯亮 → 可能忘关灯；有人呈 lying 躺姿 → 需关注是否跌倒；白天无人灯灭 → 正常。
+- 涉及"当前状态/是否安全/有没有人/宠物"等问题时，先调用 run_detection 获取真实检测结果，再据此回答，不要凭空编造。
+- 组合判断示例：厨房有猫且无人 → 宠物可能有危险；卧室有人像跌倒 → 需关注；全屋无人 → 正常。
 - 回答用中文，简洁，先给结论再给依据。
 
-持续监控规则：
-- 用户说"我离开家了，有人进来就报警"→ 先调 set_home_mode("away")，再调 add_monitor_rule(rule_type="person_enter", ...)。
-- 用户说"我回来了"→ 调 set_home_mode("home")，人员进入类规则自动解除武装。
-- 用户说"帮我看看/取消监控"→ 调 list_monitor_rules / remove_monitor_rule。
+持续监控规则（核心，体现你的自主性）：
+- 用户下监控指令时，你要自己把它解析成触发条件 when（字段：room/has_person/has_cat/has_dog/fall_like/is_night）。
+- 例："厨房有猫没人就报警" → add_monitor_rule(description="厨房有猫没人报警", when={"room":"kitchen","has_cat":true,"has_person":false})。
+- 例："有人跌倒就报警" → when={"fall_like":true}。
+- 例："我离开家了，有人进来就报警" → 先 set_home_mode("away")，再 add_monitor_rule(when={"has_person":true}, requires_mode="away")。
+- 例："我回来了" → set_home_mode("home")。
+- 用户说"帮我看看/取消监控" → list_monitor_rules / remove_monitor_rule。
 - 判断出异常时，调用 make_decision 落地告警。
 - 若检测结果返回 error（无数据），如实说明"暂无检测数据"并建议稍后重试，不要臆测。"""
 
@@ -173,28 +181,24 @@ class Agent:
         if "error" in state:
             return "（云端不可用，已降级为本地规则）当前无法获取检测数据，请稍后重试。"
 
-        # 简单规则：统计是否有人、是否有灯亮着
-        anyone = False
-        any_light_on = False
-        lying = False
-        for room in state.get("rooms", []):
-            for obj in room.get("objects", []):
-                if obj.get("category") == "person" and obj.get("count", 0) > 0:
-                    anyone = True
-                    if obj.get("pose") == "lying":
-                        lying = True
-                if obj.get("category") == "light" and obj.get("state") == "on":
-                    any_light_on = True
+        # 简单规则：统计全屋是否有异常信号
+        from event_engine import ROOM_CN
+
+        anyone = any(r.get("has_person") for r in state.get("rooms", {}).values())
+        any_fall = any(r.get("fall_like") for r in state.get("rooms", {}).values())
+        pet_rooms = [
+            ROOM_CN.get(name, name)
+            for name, r in state.get("rooms", {}).items()
+            if (r.get("has_cat") or r.get("has_dog")) and not r.get("has_person")
+        ]
 
         rules = []
-        if not anyone and any_light_on:
-            rules.append("检测到无人但仍有灯亮，可能忘关灯")
-        if lying:
-            rules.append("检测到有人呈躺卧姿态，建议关注")
-        if not anyone and not any_light_on:
-            rules.append("家中无人且灯已关闭，状态正常")
-        if anyone and not any_light_on:
-            rules.append("家中有人的状态正常")
+        if any_fall:
+            rules.append("检测到有人疑似跌倒，请立即关注")
+        if pet_rooms:
+            rules.append(f"检测到 {'、'.join(pet_rooms)} 有宠物且无人，可能需关注")
+        if not anyone and not any_fall and not pet_rooms:
+            rules.append("全屋状态正常")
 
         summary = "；".join(rules) if rules else "状态正常"
         return f"（云端不可用，已按本地规则判断）{summary}。"
