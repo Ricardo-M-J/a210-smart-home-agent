@@ -1,0 +1,20 @@
+# A210 智能家居边缘视觉 Agent —— systemd 自启单元
+# 安装：
+#   sudo cp a210-agent.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now a210-agent
+# 注意：ExecStart 里的路径按实际部署位置改（默认 /opt/a210-agent）。
+[Unit]
+Description=A210 Smart Home Vision Agent
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/a210-agent
+EnvironmentFile=/opt/a210-agent/.env
+ExecStart=/opt/a210-agent/.venv/bin/python /opt/a210-agent/web.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

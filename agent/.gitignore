@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+mock/home_state.json
+*.tmp
+memory.db
+decisions.jsonl
