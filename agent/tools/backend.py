@@ -41,7 +41,7 @@ class MockBackend(Backend):
             return {"status": "error", "detail": state["error"]}
         return {
             "status": "ok",
-            "frame_id": f"frame@{state.get('timestamp', 'unknown')}",
+            "frame_id": f"frame@{state.get('timestamp_ms', 'unknown')}",
             "note": "Mock 模式：无真实摄像头，以家居状态快照代表画面",
         }
 

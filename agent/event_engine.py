@@ -44,8 +44,12 @@ def _room_matches(room_state: dict, when: dict) -> bool:
     return True
 
 
-def check(state: dict, when: dict) -> str | None:
-    """判断全屋快照是否满足规则条件，返回命中的房间名（英文），未命中返回 None。
+def check(state: dict, when: dict) -> list[str]:
+    """判断全屋快照是否满足规则条件，返回所有命中房间名（英文）列表，未命中返回空列表。
+
+    返回列表而非单个房间：一条规则可能同时命中多个房间（如 away 模式
+    {"has_person":true} 不指定 room 时客厅、厨房都有人），漏报任何一个都是 bug，
+    由调用方对每个命中房间分别做边沿触发。
 
     when 可含字段：
         room        指定房间（英文枚举）；省略则匹配任意房间
@@ -53,24 +57,25 @@ def check(state: dict, when: dict) -> str | None:
         has_person / has_cat / has_dog / fall_like  房间级条件
     """
     if not state or "error" in state:
-        return None
+        return []
 
     # 全局条件
     if "is_night" in when:
         if is_night(state.get("timestamp_ms", 0)) != when["is_night"]:
-            return None
+            return []
 
     rooms = state.get("rooms", {})
     if not isinstance(rooms, dict):
-        return None
+        return []
 
-    # 指定房间 / 任意房间
+    # 指定房间 / 任意房间：逐个匹配，全部命中都要返回
     candidates = [when["room"]] if when.get("room") else list(rooms.keys())
+    matched = []
     for name in candidates:
         room_state = rooms.get(name)
         if room_state and _room_matches(room_state, when):
-            return name
-    return None
+            matched.append(name)
+    return matched
 
 
 class EventEngine:
@@ -93,21 +98,19 @@ class EventEngine:
             if requires_mode and Memory().get_home_mode() != requires_mode:
                 continue
 
-            room = check(state, when)
-            if room is None:
-                continue
-
-            key = f"{rule['id']}:{room}"
-            current_hits.add(key)
-            if key in self._active:
-                continue  # 持续命中，不重复上报
-            self._active.add(key)
-            events.append({
-                "rule_id": rule["id"],
-                "room": room,
-                "rule_description": rule.get("description") or "",
-                "summary": f"{ROOM_CN.get(room, room)}：命中规则「{rule.get('description') or '未命名'}」",
-            })
+            # 一条规则可能命中多个房间，逐个房间做边沿触发，避免只报第一个
+            for room in check(state, when):
+                key = f"{rule['id']}:{room}"
+                current_hits.add(key)
+                if key in self._active:
+                    continue  # 持续命中，不重复上报
+                self._active.add(key)
+                events.append({
+                    "rule_id": rule["id"],
+                    "room": room,
+                    "rule_description": rule.get("description") or "",
+                    "summary": f"{ROOM_CN.get(room, room)}：命中规则「{rule.get('description') or '未命名'}」",
+                })
 
         # 状态消失的 key 从 active 移出，下次再命中时重新触发
         self._active = current_hits

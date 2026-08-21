@@ -216,3 +216,30 @@ python web.py
 - 板端快照契约：[../docs/board-snapshot-contract.md](../docs/board-snapshot-contract.md)
 - 上板部署说明：[../docs/DEPLOY.md](../docs/DEPLOY.md)
 - 板端 C++ 改动交接：[../yolo/agent-butler_K_copy_20260821/examples/agent-butler/docs/BOARD_CPP_CHANGES.md](../yolo/agent-butler_K_copy_20260821/examples/agent-butler/docs/BOARD_CPP_CHANGES.md)
+
+---
+
+## 十、变更记录
+
+### 2026-08-21 修复 7 处 bug（3 处影响上板 + 4 处命令行入口）
+
+按"重构改了契约就要全量扫消费方"的原则，修复迭代过程中遗漏的引用点。3 处影响上板的必须改，4 处命令行入口顺手修干净。
+
+**影响上板（必改）**：
+
+| 文件 | 问题 | 修复 |
+|------|------|------|
+| [event_engine.py](event_engine.py) `check()` | 只返回第一个命中房间，away 模式多房间有人只报一个，其余永远漏报 | 改返回 `list[str]`（全部命中房间），`detect()` 逐个房间做边沿触发 |
+| [tools/monitor_rules.py](tools/monitor_rules.py) `add_monitor_rule` | 不校验 `when["room"]` 值，LLM 生成中文/拼错会入库后静默匹配不到 | 加英文枚举白名单校验，非法 room 直接拒绝 |
+| `yolo/.../cpp/main.cc` `now_ms()` | `steady_clock`（开机单调钟）当 Unix 时间戳，`is_night()` 解析出 1970 年，夜间规则全失效 | 改 `system_clock`，详见 [BOARD_CPP_CHANGES.md 第八节](../yolo/agent-butler_K_copy_20260821/examples/agent-butler/docs/BOARD_CPP_CHANGES.md)（**需队友重新编译**） |
+
+**命令行入口（不影响上板，顺手修）**：
+
+| 文件 | 问题 | 修复 |
+|------|------|------|
+| [main.py](main.py) `list_scenes()` | 把 `rooms`（dict）当 list 遍历 + 读已废弃的 `timestamp` 字段 → `--list-scenes` 必崩 | 改遍历 dict、读 `timestamp_ms`、列有信号的房间 |
+| [main.py](main.py) `watch()` | 读不存在的 `ev['rule_type']` → `--watch` 必崩 | 改 `ev['rule_description']` |
+| [main.py](main.py) `--history` | choices 缺 `rules`，else 分支按 `role/content` 打印对 rules 表 KeyError | choices 加 `rules`，新增 rules 分支打印 `id/active/description/when_json/action` |
+| [tools/backend.py](tools/backend.py) `MockBackend.capture()` | 读 `timestamp` 旧字段，`frame_id` 永远 `frame@unknown` | 改 `timestamp_ms`，与 `RealBackend` 对齐 |
+
+> 教训：之前验证只走 Web 主路径，命令行入口、多房间场景、非法输入、C++ 兜底路径都没跑过，bug 全在验证盲区里。后续验证需覆盖每条入口和边界输入。

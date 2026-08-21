@@ -32,6 +32,7 @@
 | 4 | `parse_args` | 加 `--snapshot`（带值）、`--emit-events`（布尔开关，不带值，用 `continue` 跳过取值） |
 | 5 | 新增 `write_snapshot()` | 把 `home_state` 序列化成 JSON，`.tmp` + `rename` 原子写 |
 | 6 | `process_frame` | 检测完更新 `home_state[room]` 并写快照；`evaluate_rules` 改成受 `--emit-events` 控制 |
+| 7 | `now_ms()` | `steady_clock` → `system_clock`（见下方第八节，**需重新编译**） |
 
 **我没有动的**（你原来的逻辑都保留）：
 
@@ -119,3 +120,43 @@ cat /tmp/home_state.json
 ## 七、Agent 侧怎么配合
 
 Agent 侧（Python）已经按上面第三节的格式读快照。所以**只要快照格式对，两边就能通**。Agent 的规则是用户下指令、LLM 动态生成的条件，事件引擎通用匹配 + 边沿触发，不依赖 C++ 里的任何硬编码规则。
+
+---
+
+## 八、时间戳时钟修正（now_ms 改动，需重新编译）
+
+### 问题
+
+原来 `now_ms()` 用的是 `steady_clock`：
+
+```cpp
+return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+```
+
+`steady_clock` 是**单调钟**（从板子开机时刻算起，不是 Unix 纪元）。`now_ms()` 在 `process_frame` 里当兜底时间戳用（`header.timestamp_ms > 0 ? header.timestamp_ms : now_ms()`）：只要发帧端 `timestamp_ms` 传 0 或漏传（demo 脚本里很常见），快照里的 `timestamp_ms` 就变成"开机后多少毫秒"。
+
+Agent 侧 `is_night()` 用 `datetime.fromtimestamp(ts_ms / 1000)` 解析这个值，会得到 1970 年附近的时间 → 昼夜判断永远 false → 所有 `is_night:true` 的夜间规则（如"夜里有人进入就报警"）**永远不命中**。
+
+### 修正
+
+改成 `system_clock`（Unix 纪元）：
+
+```cpp
+return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+```
+
+代码已改好（见第二节表格第 7 行）。注释也写在了 `now_ms()` 函数体里。
+
+### 你需要做的
+
+1. **重新编译**（命令不变）：
+   ```bash
+   cd /home/public/ai/tools/torq-model-zoo
+   ./build-linux.sh -t a210 -d agent-butler
+   ```
+2. 上板后跑一次夜间场景验证 `is_night()` 生效：
+   - 不发 `timestamp_ms`（让走兜底）或发真实夜间时间戳
+   - 在 Agent 侧登记一条 `{"has_person":true,"is_night":true}` 规则
+   - 触发后确认告警能上来（修正前永远触发不到）
+
+> 即使你保证发帧端每次都传真实时间戳，也建议保留这处改动——`steady_clock` 当 Unix 时间戳用是典型的语义误用，留着是隐患。

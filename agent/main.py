@@ -6,7 +6,7 @@
     python main.py --scene night_lying --ask "老人现在状态怎么样？"   # 单次提问
     python main.py --list-scenes                # 列出所有 Mock 场景
     python main.py --watch --scene night_nobody_on   # 事件轮询：检测异常→决策→告警
-    python main.py --history decisions          # 查看记忆（decisions/events/conversations）
+    python main.py --history decisions          # 查看记忆（decisions/events/conversations/rules）
 """
 import argparse
 import sys
@@ -21,9 +21,10 @@ from tools.reader import read_home_state
 
 
 def list_scenes() -> None:
+    # 快照格式：rooms 是 dict（房间名 -> 信号），timestamp_ms 为毫秒时间戳
     for name, snap in SCENARIOS.items():
-        rooms = "、".join(r["room"] for r in snap["rooms"])
-        print(f"  {name:<18} {snap['timestamp']}  房间: {rooms}")
+        active = [r for r, s in snap["rooms"].items() if any(s.values())]
+        print(f"  {name:<18} ts={snap.get('timestamp_ms', '?')}  有信号: {', '.join(active) if active else '（全空）'}")
 
 
 def show_history(table: str) -> None:
@@ -36,6 +37,9 @@ def show_history(table: str) -> None:
             print(f"[{r['time']}] {r['action']} | {r['conclusion']} | {r['message']}")
         elif table == "events":
             print(f"[{r['time']}] {r['severity']} | {r['event_type']} | {r['key']} | {r['summary']}")
+        elif table == "rules":
+            active = "启用" if r.get("active") else "停用"
+            print(f"[{r['time']}] #{r['id']} {active} | {r.get('description','')} | when={r.get('when_json','')} | {r.get('action','alert')}")
         else:
             print(f"[{r['time']}] {r['role']}: {r['content']}")
 
@@ -51,7 +55,7 @@ def watch(scene: str, interval: float = 1.0) -> None:
             state = read_home_state()
             events = engine.detect(state)
             for ev in events:
-                print(f"\n[疑似事件] {ev['summary']}（规则: {ev['rule_type']}）")
+                print(f"\n[疑似事件] {ev['summary']}（规则: {ev['rule_description']}）")
                 result = agent.on_event(ev)
                 print(f"[Agent] {result}")
             time.sleep(interval)
@@ -65,7 +69,7 @@ def main() -> None:
     parser.add_argument("--ask", default=None, help="单次提问；不传则进入交互模式")
     parser.add_argument("--list-scenes", action="store_true", help="列出所有场景")
     parser.add_argument("--watch", action="store_true", help="事件轮询模式")
-    parser.add_argument("--history", choices=["decisions", "events", "conversations"], help="查看记忆历史")
+    parser.add_argument("--history", choices=["decisions", "events", "conversations", "rules"], help="查看记忆历史")
     args = parser.parse_args()
 
     if args.list_scenes:

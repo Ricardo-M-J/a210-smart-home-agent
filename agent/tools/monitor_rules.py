@@ -123,6 +123,10 @@ def add_monitor_rule(description: str, when: dict, action: str = "alert", requir
     unknown = set(when) - allowed
     if unknown:
         return {"status": "error", "detail": f"未知条件字段: {unknown}，可选 {sorted(allowed)}"}
+    # 校验 room 值在英文枚举里：LLM 偶尔生成中文（如"客厅"）或拼错，
+    # 不校验会入库后永远匹配不到（rooms 的 key 是英文），用户以为设了监控其实没在干活
+    if "room" in when and when["room"] not in _ROOMS:
+        return {"status": "error", "detail": f"room 非法: {when['room']!r}，可选 {_ROOMS}"}
 
     rule_id = Memory().add_rule(description, when, action, requires_mode)
     return {

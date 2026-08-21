@@ -86,8 +86,11 @@ static void on_signal(int)
 
 static int64_t now_ms()
 {
+    // 用 system_clock（Unix 纪元），不要用 steady_clock（开机单调钟）。
+    // now_ms 兜底写入快照 timestamp_ms，Agent 侧 is_night() 用 datetime.fromtimestamp 解析，
+    // 若用 steady_clock 会得到 1970 年附近，昼夜规则全部失效。
     using namespace std::chrono;
-    return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+    return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
 }
 
 static void print_usage(const char *prog)
