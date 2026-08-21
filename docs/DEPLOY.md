@@ -35,7 +35,7 @@ cd /home/public/ai/tools/torq-model-zoo
 
 产物在 `install/a210_linux/torq_agent-butler_demo/`。
 
-> ⚠️ 如果编译报错，把报错贴回来，我来改（我本地没有 A210 编译环境）。
+> 如果编译报错，参考 `BOARD_CPP_CHANGES.md` 第六节的排查点，多数是 `main.cc` 改动的头文件/声明顺序问题，可自行定位修正。
 
 ---
 
@@ -128,9 +128,9 @@ http://<板子的IP>:8000
 
 | 问题 | 排查 |
 |------|------|
-| 板端编译报错 | 贴报错给我，多半是我改的 main.cc 有语法/头文件问题 |
+| 板端编译报错 | 看 `BOARD_CPP_CHANGES.md` 第六节，多半是 main.cc 改动的头文件/声明顺序问题 |
 | 快照文件不存在 | 板端程序没收到帧；确认 send_frame.py 的 host/port 对 |
 | Agent 读不到快照 | 确认 .env 的 HOME_STATE_FILE 和板端写的路径一致（都是 /tmp/home_state.json） |
 | 问答返回"暂无检测数据" | 确认 BACKEND=real 且快照文件有合法 JSON |
-| Flask 装不上（riscv64） | 告诉我，可能降级成纯标准库 http.server |
+| Flask 装不上（riscv64） | 可降级成纯标准库 http.server（代码预留了 Web 层，替换 web.py 即可） |
 | 调 LLM 失败 | 确认 API Key 填对、板子能上网 |
