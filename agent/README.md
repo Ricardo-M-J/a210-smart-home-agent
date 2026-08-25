@@ -1,4 +1,4 @@
-# A210 智能家居边缘视觉 Agent
+﻿# A210 智能家居边缘视觉 Agent
 
 > 在 A210 开发板（RISC-V · 12 TOPS NPU · Linux Debian）上，做一个**智能家居边缘视觉 Agent**：
 > 板端 YOLO 检测全屋状态（有人/有猫/有狗/跌倒），Agent 接收「用户提问」和「可疑事件」两种触发，
@@ -103,14 +103,14 @@ agent/
 Agent 与感知层的唯一数据契约，完整定义见 [docs/board-snapshot-contract.md](../docs/board-snapshot-contract.md)。
 
 - **交换方式**：文件 IPC，感知进程（队友 C++）原子写 `HOME_STATE_FILE`，Agent 轮询读
-- **格式**：全屋聚合，五个房间每个带 4 个信号字段
+- **格式**：全屋聚合，四个房间每个带基础视觉信号，并可扩展安全/健康信号字段
 
 ```json
 {
   "timestamp_ms": 123456789,
   "rooms": {
     "living_room": {"has_person": false, "has_cat": false, "has_dog": false, "fall_like": false},
-    "bedroom1":    {"has_person": true,  "has_cat": false, "has_dog": false, "fall_like": true},
+    "bedroom":     {"has_person": true,  "has_cat": false, "has_dog": false, "fall_like": true},
     "kitchen":     {"has_person": false, "has_cat": true,  "has_dog": false, "fall_like": false},
     "...": "..."
   }
@@ -127,8 +127,8 @@ Agent 与感知层的唯一数据契约，完整定义见 [docs/board-snapshot-c
 
 规则是 LLM 从用户指令生成的条件字典，存在 SQLite `rules` 表。信号字段固定（YOLO 能力决定）：
 
-- 每个房间：`has_person` / `has_cat` / `has_dog` / `fall_like`
-- 房间：`living_room` / `bedroom1` / `bedroom2` / `kitchen` / `bathroom`
+- 每个房间：`has_person` / `has_cat` / `has_dog` / `fall_like` / `hazard_detected` / `hazard_type` / `health_event` / `unknown_person`
+- 房间：`living_room` / `bedroom` / `kitchen` / `bathroom`
 - 时间：`is_night`（是否夜间）
 
 ### 在家/离家模式（规则的前置条件）
@@ -170,7 +170,7 @@ python main.py --history rules               # 查规则/记忆
 
 ```bash
 python web.py
-# 打开 http://127.0.0.1:8000
+# 打开 http://127.0.0.1:8019
 ```
 
 ### 配置（.env）
@@ -182,7 +182,7 @@ python web.py
 | `DASHSCOPE_MODEL` | 模型名 | `qwen3.6-flash` |
 | `HOME_STATE_FILE` | 快照文件路径 | `./mock/home_state.json`（上板改 `/tmp/home_state.json`） |
 | `BACKEND` | 端侧后端 `mock`/`real` | `mock` |
-| `WEB_HOST` / `WEB_PORT` | Web 监听 | `0.0.0.0` / `8000` |
+| `WEB_HOST` / `WEB_PORT` | Web 监听 | `0.0.0.0` / `8019` |
 
 ---
 
@@ -243,3 +243,5 @@ python web.py
 | [tools/backend.py](tools/backend.py) `MockBackend.capture()` | 读 `timestamp` 旧字段，`frame_id` 永远 `frame@unknown` | 改 `timestamp_ms`，与 `RealBackend` 对齐 |
 
 > 教训：之前验证只走 Web 主路径，命令行入口、多房间场景、非法输入、C++ 兜底路径都没跑过，bug 全在验证盲区里。后续验证需覆盖每条入口和边界输入。
+
+

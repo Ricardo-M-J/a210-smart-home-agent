@@ -1,0 +1,41 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Agent Web (VirtualHome, 8019)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}\\agent\\web.py",
+      "python": "${workspaceFolder}\\VIRTUAL_HOME\\vhome\\Scripts\\python.exe",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "BACKEND": "virtualhome",
+        "WEB_PORT": "8019"
+      },
+      "justMyCode": true
+    },
+    {
+      "name": "VirtualHome Showcase Panel",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}\\VIRTUAL_HOME\\src\\virtualhome_env\\showcase_panel.py",
+      "python": "${workspaceFolder}\\VIRTUAL_HOME\\vhome\\Scripts\\python.exe",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "A210_AGENT_URL": "http://127.0.0.1:8019"
+      },
+      "justMyCode": true
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Agent + VirtualHome Panel",
+      "configurations": [
+        "Agent Web (VirtualHome, 8019)",
+        "VirtualHome Showcase Panel"
+      ]
+    }
+  ]
+}

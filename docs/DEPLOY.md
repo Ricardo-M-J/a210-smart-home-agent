@@ -56,7 +56,7 @@ cd torq_agent-butler_demo
 
 ```bash
 cat /tmp/home_state.json
-# 应看到 {"timestamp_ms":..., "rooms":{五个房间...}}
+# 应看到 {"timestamp_ms":..., "rooms":{四个房间...}}
 ```
 
 ---
@@ -133,4 +133,12 @@ http://<板子的IP>:8000
 | Agent 读不到快照 | 确认 .env 的 HOME_STATE_FILE 和板端写的路径一致（都是 /tmp/home_state.json） |
 | 问答返回"暂无检测数据" | 确认 BACKEND=real 且快照文件有合法 JSON |
 | Flask 装不上（riscv64） | 可降级成纯标准库 http.server（代码预留了 Web 层，替换 web.py 即可） |
-| 调 LLM 失败 | 确认 API Key 填对、板子能上网 |
+| 调 LLM 失败 | 确认 API Key 没有行尾空格，`DASHSCOPE_BASE_URL` 是 OpenAI 兼容端点，板子能访问外网 |
+
+可以直接看 Agent 暴露的云端健康检查：
+
+```bash
+curl http://127.0.0.1:<Agent端口>/api/llm/status
+```
+
+`ok=true` 表示 key、模型名和网络链路都正常；如果为 `false`，`detail/http_status` 会给出具体原因。

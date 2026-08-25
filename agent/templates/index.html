@@ -3,141 +3,223 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>A210 智能家居视觉 Agent</title>
+  <title>A210 智能家居 Agent</title>
   <style>
     :root {
-      --bg: #1c1b1a;
-      --panel: #282625;
-      --border: #3a3836;
-      --text: #f0edea;
-      --muted: #a8a29e;
-      --accent: #d9a441;
-      --accent-dim: #b8862e;
-      --ok: #5b8c5a;
-      --warn: #d9a441;
-      --alert: #c95b4e;
+      --bg: #171717;
+      --panel: #242424;
+      --panel-2: #2d2d2d;
+      --border: #3d3d3d;
+      --text: #f4f4f5;
+      --muted: #a1a1aa;
+      --accent: #f0b44c;
+      --ok: #72b279;
+      --alert: #ef6a5b;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    * { box-sizing: border-box; }
     body {
-      font-family: "Inter", "HarmonyOS Sans", "Microsoft YaHei", sans-serif;
-      background: var(--bg);
-      color: var(--text);
+      margin: 0;
       height: 100vh;
       display: flex;
       flex-direction: column;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Inter", "Microsoft YaHei", sans-serif;
     }
     header {
-      padding: 14px 20px;
-      border-bottom: 1px solid var(--border);
+      height: 54px;
+      padding: 0 18px;
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
+      border-bottom: 1px solid var(--border);
     }
-    header h1 { font-size: 18px; font-weight: 600; }
-    header .dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: var(--ok); display: inline-block;
-    }
-    header .sub { color: var(--muted); font-size: 12px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+    h1 { margin: 0; font-size: 17px; font-weight: 650; }
+    .sub { color: var(--muted); font-size: 12px; }
     .layout {
-      flex: 1; display: grid;
-      grid-template-columns: 1fr 340px;
-      gap: 12px; padding: 12px; overflow: hidden;
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 380px;
+      gap: 12px;
+      padding: 12px;
     }
     .card {
-      background: var(--panel); border: 1px solid var(--border);
-      border-radius: 10px; display: flex; flex-direction: column;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
       overflow: hidden;
     }
     .card h2 {
-      font-size: 13px; font-weight: 600; padding: 12px 14px;
-      border-bottom: 1px solid var(--border); color: var(--accent);
+      margin: 0;
+      padding: 11px 13px;
+      border-bottom: 1px solid var(--border);
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 650;
     }
-    /* 聊天区 */
     .chat-body {
-      flex: 1; overflow-y: auto; padding: 14px;
-      display: flex; flex-direction: column; gap: 10px;
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
     }
-    .msg { max-width: 78%; padding: 10px 12px; border-radius: 10px; line-height: 1.5; font-size: 14px; white-space: pre-wrap; }
-    .msg.user { align-self: flex-end; background: var(--accent-dim); color: #fff; }
-    .msg.agent { align-self: flex-start; background: #33302e; }
+    .msg {
+      max-width: 84%;
+      padding: 10px 12px;
+      border-radius: 8px;
+      line-height: 1.55;
+      font-size: 14px;
+      white-space: pre-wrap;
+    }
+    .msg.user { align-self: flex-end; background: #806328; }
+    .msg.agent { align-self: flex-start; background: var(--panel-2); }
+    .msg.notice { align-self: flex-start; background: #26312a; border-left: 3px solid var(--ok); }
+    .msg.notice.alert { background: #34231f; border-left-color: var(--alert); }
     .chat-input {
-      display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--border);
+      display: flex;
+      gap: 8px;
+      padding: 12px;
+      border-top: 1px solid var(--border);
     }
-    .chat-input input {
-      flex: 1; background: #1c1b1a; border: 1px solid var(--border);
-      border-radius: 8px; padding: 10px 12px; color: var(--text); font-size: 14px;
+    input {
+      width: 100%;
+      min-width: 0;
+      background: #191919;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 10px;
+      color: var(--text);
+      font-size: 14px;
     }
-    .chat-input button {
-      background: var(--accent); border: none; color: #1c1b1a;
-      padding: 0 18px; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 14px;
+    button {
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--accent);
+      padding: 0 14px;
+      font-weight: 650;
+      cursor: pointer;
+      white-space: nowrap;
     }
-    .chat-input button:disabled { opacity: .5; cursor: not-allowed; }
-    /* 右侧列 */
-    .right-col { display: flex; flex-direction: column; gap: 12px; }
-    .scene-row { display: flex; gap: 8px; padding: 12px; }
-    .scene-row select {
-      flex: 1; background: #1c1b1a; border: 1px solid var(--border);
-      border-radius: 8px; padding: 8px; color: var(--text);
+    .chat-input button { background: var(--accent); color: #171717; border-color: var(--accent); }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    .right-col { min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+    .mode-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px; }
+    .mode-row button { height: 38px; border-color: var(--border); color: var(--text); background: #191919; }
+    .mode-row button.active { border-color: var(--accent); color: #171717; background: var(--accent); }
+    .mode-note { padding: 0 12px 12px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .state-body, .alert-body { flex: 1; min-height: 0; overflow-y: auto; padding: 13px; font-size: 13px; }
+    .state-meta { display: grid; gap: 4px; margin-bottom: 11px; color: var(--muted); font-size: 12px; }
+    .room-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .room-tile {
+      min-height: 138px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #1d1d1d;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
     }
-    .scene-row button {
-      background: transparent; border: 1px solid var(--accent); color: var(--accent);
-      padding: 0 14px; border-radius: 8px; cursor: pointer;
+    .room-tile.alert { border-color: var(--alert); background: #241f1d; }
+    .room-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .room-name { font-size: 14px; font-weight: 700; color: var(--text); }
+    .room-light { font-size: 12px; color: var(--muted); }
+    .person-count { font-size: 30px; line-height: 1; font-weight: 750; color: var(--accent); }
+    .person-count span { display: block; margin-top: 4px; font-size: 12px; font-weight: 500; color: var(--muted); }
+    .metric-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .metric { border: 1px solid #353535; border-radius: 6px; padding: 6px; background: #181818; }
+    .metric b { display: block; font-size: 15px; color: var(--text); }
+    .metric span { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+    .room-status { margin-top: auto; color: var(--ok); line-height: 1.4; }
+    .room-tile.alert .room-status { color: var(--alert); }
+    .device-list { margin-top: 10px; color: var(--muted); line-height: 1.5; font-size: 12px; }
+    .music-panel {
+      margin-top: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #1b1b1b;
+      padding: 10px;
+      display: grid;
+      gap: 8px;
     }
-    .state-body, .alert-body { flex: 1; overflow-y: auto; padding: 12px; font-size: 13px; }
-    .room { margin-bottom: 12px; }
-    .room-name { color: var(--accent); font-weight: 600; margin-bottom: 6px; }
-    .obj { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed var(--border); }
-    .obj .val { color: var(--muted); }
-    .badge { padding: 2px 8px; border-radius: 10px; font-size: 12px; }
-    .badge.warning { background: rgba(217,164,65,.2); color: var(--warn); }
-    .badge.alert { background: rgba(201,91,78,.2); color: var(--alert); }
-    .badge.info { background: rgba(91,140,90,.2); color: var(--ok); }
-    .alert-item { padding: 8px; border-left: 3px solid var(--warn); margin-bottom: 8px; background: #2e2b29; border-radius: 6px; }
+    .music-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .music-title { font-weight: 700; color: var(--text); }
+    .music-state { color: var(--accent); font-size: 12px; white-space: nowrap; }
+    .track-list { display: flex; flex-wrap: wrap; gap: 6px; }
+    .track-chip {
+      max-width: 100%;
+      border: 1px solid #343434;
+      border-radius: 6px;
+      padding: 4px 6px;
+      color: var(--muted);
+      background: #181818;
+      font-size: 11px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .track-chip.active { color: #171717; background: var(--accent); border-color: var(--accent); }
+    .alert-item { padding: 9px; border-left: 3px solid var(--accent); margin-bottom: 8px; background: var(--panel-2); border-radius: 6px; }
     .alert-item.alert { border-left-color: var(--alert); }
     .alert-item .t { color: var(--muted); font-size: 11px; }
-    .alert-item .s { font-size: 13px; margin: 4px 0; }
-    .alert-item .r { color: var(--muted); font-size: 12px; }
+    .alert-item .s { margin: 4px 0; }
+    .alert-item .r { color: var(--muted); font-size: 12px; line-height: 1.45; }
+    @media (max-width: 900px) {
+      body { height: auto; min-height: 100vh; }
+      .layout { grid-template-columns: 1fr; overflow: visible; }
+      .card { min-height: 260px; }
+      .room-grid { grid-template-columns: 1fr; }
+      .right-col { min-height: 600px; }
+      .sub { display: none; }
+    }
   </style>
 </head>
 <body>
   <header>
     <span class="dot"></span>
-    <h1>A210 智能家居视觉 Agent</h1>
-    <span class="sub">边缘视觉 · 端云协同 · 组合式判断</span>
+    <h1>A210 智能家居 Agent</h1>
+    <span class="sub">VirtualHome 四房间实时同步</span>
   </header>
 
   <div class="layout">
-    <!-- 左：聊天 -->
     <div class="card">
-      <h2>自然语言问答</h2>
+      <h2>对话</h2>
       <div class="chat-body" id="chatBody">
-        <div class="msg agent">你好，我是智能家居视觉 Agent。可以问我「家里现在安全吗」「是不是忘关灯了」「老人在哪个房间」等问题。</div>
+        <div class="msg agent">你好。我可以同步 VirtualHome 状态，也可以控制四个房间的灯光和全屋音乐。</div>
       </div>
       <div class="chat-input">
-        <input id="question" placeholder="输入问题，回车发送…">
+        <input id="question" placeholder="例如：打开厨房灯 / 播放音乐 / 停止音乐 / 现在家里安全吗">
         <button id="sendBtn">发送</button>
       </div>
     </div>
 
-    <!-- 右列 -->
     <div class="right-col">
       <div class="card" style="flex:0 0 auto;">
-        <h2>场景控制（模拟感知层）</h2>
-        <div class="scene-row">
-          <select id="sceneSelect"></select>
-          <button id="applyScene">切换</button>
+        <h2>家居模式</h2>
+        <div class="mode-row">
+          <button class="mode-btn" data-mode="home">居家</button>
+          <button class="mode-btn" data-mode="away">离家</button>
         </div>
+        <div class="mode-note" id="modeNote">当前模式：读取中</div>
       </div>
 
-      <div class="card" style="flex:1;">
+      <div class="card" style="flex:1.15;">
         <h2>当前家居状态</h2>
-        <div class="state-body" id="stateBody">加载中…</div>
+        <div class="state-body" id="stateBody">加载中</div>
       </div>
 
-      <div class="card" style="flex:1;">
-        <h2>事件告警</h2>
-        <div class="alert-body" id="alertBody">暂无告警</div>
+      <div class="card" style="flex:0.85;">
+        <h2>系统事件</h2>
+        <div class="alert-body" id="alertBody">暂无事件</div>
       </div>
     </div>
   </div>
@@ -148,12 +230,15 @@
     const sendBtn = document.getElementById('sendBtn');
     const stateBody = document.getElementById('stateBody');
     const alertBody = document.getElementById('alertBody');
-    const sceneSelect = document.getElementById('sceneSelect');
-    const applyScene = document.getElementById('applyScene');
+    const modeNote = document.getElementById('modeNote');
+    const modeButtons = Array.from(document.querySelectorAll('.mode-btn'));
+    const roomCn = {living_room: '客厅', bedroom: '卧室', kitchen: '厨房', bathroom: '卫生间'};
+    let lastNoticeId = 0;
+    let currentMode = 'home';
 
-    function addMsg(role, text) {
+    function addMsg(role, text, extraClass = '') {
       const div = document.createElement('div');
-      div.className = 'msg ' + role;
+      div.className = 'msg ' + role + (extraClass ? ' ' + extraClass : '');
       div.textContent = text;
       chatBody.appendChild(div);
       chatBody.scrollTop = chatBody.scrollHeight;
@@ -167,100 +252,252 @@
       sendBtn.disabled = true;
       try {
         const resp = await fetch('/api/chat', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({question: q})
         });
         const data = await resp.json();
-        addMsg('agent', data.answer || data.error || '（无回答）');
+        addMsg('agent', data.answer || data.error || '无回答');
+        poll();
       } catch (e) {
-        addMsg('agent', '（请求失败：' + e + '）');
+        addMsg('agent', '请求失败：' + e);
       } finally {
         sendBtn.disabled = false;
       }
     }
-    sendBtn.onclick = send;
-    question.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
 
-    // 状态面板
-    const roomCn = {living_room:'客厅', bedroom1:'卧室1', bedroom2:'卧室2', kitchen:'厨房', bathroom:'卫生间'};
-    function renderState(s) {
-      if (!s || s.error) { stateBody.textContent = s.error || '暂无数据'; return; }
-      stateBody.innerHTML = '';
-      const time = document.createElement('div');
-      time.style.color = 'var(--muted)';
-      time.style.marginBottom = '8px';
-      time.textContent = '快照时间：' + (s.timestamp_ms ? new Date(s.timestamp_ms).toLocaleString() : '-');
-      stateBody.appendChild(time);
-      const rooms = s.rooms || {};
-      for (const [name, r] of Object.entries(rooms)) {
-        const rd = document.createElement('div');
-        rd.className = 'room';
-        const rn = document.createElement('div');
-        rn.className = 'room-name';
-        rn.textContent = roomCn[name] || name;
-        rd.appendChild(rn);
-        const sigs = [];
-        if (r.has_person) sigs.push('有人');
-        if (r.has_cat) sigs.push('有猫');
-        if (r.has_dog) sigs.push('有狗');
-        if (r.fall_like) sigs.push('疑似跌倒');
-        const v = document.createElement('div');
-        v.className = 'val';
-        v.textContent = sigs.length ? sigs.join(' · ') : '无异常';
-        rd.appendChild(v);
-        stateBody.appendChild(rd);
+    function countValue(value, fallbackBool = false) {
+      const n = Number(value);
+      if (Number.isFinite(n)) return Math.max(0, Math.trunc(n));
+      return fallbackBool ? 1 : 0;
+    }
+
+    function roomStats(r) {
+      const person = countValue(r.person_count, r.has_person);
+      const cat = countValue(r.cat_count, r.has_cat);
+      const dog = countValue(r.dog_count, r.has_dog);
+      const pet = countValue(r.pet_count, r.has_cat || r.has_dog);
+      const unknown = countValue(r.unknown_person_count, r.unknown_person);
+      const otherPet = Math.max(0, pet - cat - dog);
+      const liveTotal = countValue(r.live_object_count) || person + cat + dog + otherPet;
+
+      const counts = [`人 ${person}`, `猫 ${cat}`, `狗 ${dog}`];
+      if (otherPet) counts.push(`其他宠物 ${otherPet}`);
+      if (unknown) counts.push(`陌生人 ${unknown}`);
+
+      const abnormal = [];
+      if (r.fall_like) abnormal.push('疑似跌倒');
+      if (r.hazard_detected) abnormal.push(r.hazard_type ? `危险信号 ${r.hazard_type}` : '危险信号');
+      if (r.health_event) abnormal.push('健康事件');
+      if (r.unknown_person) abnormal.push('陌生人');
+      if ((cat + dog + otherPet) > 0 && person === 0) abnormal.push('宠物独处');
+
+      return {person, cat, dog, unknown, otherPet, liveTotal, abnormal};
+    }
+
+    function roomLightText(room, deviceState) {
+      const lights = (deviceState && deviceState.lights) || {};
+      const value = String(lights[`${room}_ceiling_light`] || 'on').toLowerCase();
+      if (value === 'on') return '灯光 开';
+      if (value === 'off') return '灯光 关';
+      return '灯光 开';
+    }
+
+    function wholeHomeSpeaker(deviceState) {
+      const speakers = (deviceState && deviceState.speakers) || {};
+      const value = speakers.whole_home_speaker || {};
+      return typeof value === 'object' ? value : {state: value};
+    }
+
+    function speakerStateText(state) {
+      const value = String(state || 'stop').toLowerCase();
+      if (value === 'playing' || value === 'play' || value === 'on') return '播放中';
+      if (value === 'pause') return '暂停';
+      return '关闭';
+    }
+
+    function musicInfo(deviceState) {
+      const speaker = wholeHomeSpeaker(deviceState);
+      const library = (deviceState && deviceState.music_library) || {};
+      const libraryTracks = Array.isArray(library.tracks) ? library.tracks : [];
+      const namesFromLibrary = libraryTracks.map(item => item.name || item.file).filter(Boolean);
+      const namesFromSpeaker = Array.isArray(speaker.available_tracks) ? speaker.available_tracks : [];
+      const tracks = namesFromSpeaker.length ? namesFromSpeaker : namesFromLibrary;
+      return {
+        state: speaker.state || 'stop',
+        stateText: speakerStateText(speaker.state),
+        track: speaker.track || '',
+        tracks
+      };
+    }
+
+    function renderMusicPanel(deviceState) {
+      const info = musicInfo(deviceState);
+      const panel = document.createElement('div');
+      panel.className = 'music-panel';
+      panel.innerHTML = `
+        <div class="music-head">
+          <div class="music-title">全屋音乐</div>
+          <div class="music-state"></div>
+        </div>
+        <div class="track-list"></div>
+      `;
+      const activeTrack = info.track || (info.tracks.length ? info.tracks[0] : '');
+      panel.querySelector('.music-state').textContent = info.track
+        ? `${info.stateText} · ${info.track}`
+        : info.stateText;
+      const list = panel.querySelector('.track-list');
+      const names = info.tracks.length ? info.tracks : ['暂无曲目'];
+      for (const name of names) {
+        const chip = document.createElement('span');
+        chip.className = 'track-chip' + (name === activeTrack && info.stateText === '播放中' ? ' active' : '');
+        chip.textContent = name;
+        list.appendChild(chip);
+      }
+      return panel;
+    }
+
+    function renderMode(mode) {
+      currentMode = mode === 'away' ? 'away' : 'home';
+      modeNote.textContent = currentMode === 'away'
+        ? '当前模式：离家。陌生人和安全事件会更敏感。'
+        : '当前模式：居家。日常活动按居家场景处理。';
+      for (const button of modeButtons) {
+        button.classList.toggle('active', button.dataset.mode === currentMode);
       }
     }
 
-    // 告警面板
+    async function loadMode() {
+      try {
+        const data = await fetch('/api/home-mode').then(r => r.json());
+        renderMode(data.mode || 'home');
+      } catch (e) {}
+    }
+
+    async function setMode(mode) {
+      renderMode(mode);
+      try {
+        const data = await fetch('/api/home-mode', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({mode})
+        }).then(r => r.json());
+        renderMode(data.mode || mode);
+      } catch (e) {
+        modeNote.textContent = '模式切换失败，请确认后端还在运行。';
+      }
+    }
+
+    function renderRoomTile(room, state, deviceState) {
+      const stats = roomStats(state || {});
+      const tile = document.createElement('div');
+      tile.className = 'room-tile' + (stats.abnormal.length ? ' alert' : '');
+      tile.innerHTML = `
+        <div class="room-head">
+          <div class="room-name"></div>
+          <div class="room-light"></div>
+        </div>
+        <div class="person-count"><strong></strong><span>当前人数</span></div>
+        <div class="metric-row">
+          <div class="metric"><b></b><span>猫</span></div>
+          <div class="metric"><b></b><span>狗</span></div>
+          <div class="metric"><b></b><span>陌生人</span></div>
+        </div>
+        <div class="room-status"></div>
+      `;
+      tile.querySelector('.room-name').textContent = roomCn[room] || room;
+      tile.querySelector('.room-light').textContent = roomLightText(room, deviceState);
+      tile.querySelector('.person-count strong').textContent = stats.person;
+      const metrics = tile.querySelectorAll('.metric b');
+      metrics[0].textContent = stats.cat + (stats.otherPet ? ` +${stats.otherPet}` : '');
+      metrics[1].textContent = stats.dog;
+      metrics[2].textContent = stats.unknown;
+      tile.querySelector('.room-status').textContent = stats.abnormal.length ? stats.abnormal.join('、') : '状态正常';
+      return tile;
+    }
+
+    function renderState(s) {
+      if (!s || s.error) {
+        stateBody.textContent = (s && s.error) || '暂无数据';
+        return;
+      }
+      const scene = s.virtualhome && s.virtualhome.scene ? s.virtualhome.scene : '-';
+      const live = s.virtualhome && s.virtualhome.live ? '实时帧流' : '样本状态';
+      const time = s.timestamp_ms ? new Date(s.timestamp_ms).toLocaleString() : '-';
+      const rooms = s.rooms || {};
+      const deviceState = s.virtualhome && s.virtualhome.device_state;
+
+      stateBody.innerHTML = '';
+      const meta = document.createElement('div');
+      meta.className = 'state-meta';
+      meta.innerHTML = '<div></div><div></div><div></div>';
+      const metaRows = meta.querySelectorAll('div');
+      metaRows[0].textContent = `场景：${scene}`;
+      metaRows[1].textContent = `更新时间：${time}`;
+      metaRows[2].textContent = `来源：${live} · 模式：${currentMode === 'away' ? '离家' : '居家'}`;
+      stateBody.appendChild(meta);
+
+      const grid = document.createElement('div');
+      grid.className = 'room-grid';
+      for (const name of ['living_room', 'bedroom', 'kitchen', 'bathroom']) {
+        grid.appendChild(renderRoomTile(name, rooms[name] || {}, deviceState));
+      }
+      stateBody.appendChild(grid);
+
+      stateBody.appendChild(renderMusicPanel(deviceState));
+    }
+
     function renderAlerts(alerts) {
-      if (!alerts || alerts.length === 0) { alertBody.textContent = '暂无告警'; return; }
+      if (!alerts || alerts.length === 0) {
+        alertBody.textContent = '暂无事件';
+        return;
+      }
       alertBody.innerHTML = '';
       for (const a of alerts) {
         const item = document.createElement('div');
         item.className = 'alert-item ' + (a.severity === 'alert' ? 'alert' : '');
-        const t = document.createElement('div');
-        t.className = 't';
-        t.textContent = a.time + ' · ' + a.severity;
-        const s = document.createElement('div');
-        s.className = 's';
-        s.textContent = a.summary;
-        const r = document.createElement('div');
-        r.className = 'r';
-        r.textContent = a.response;
-        item.appendChild(t); item.appendChild(s); item.appendChild(r);
+        item.innerHTML = `<div class="t"></div><div class="s"></div><div class="r"></div>`;
+        item.querySelector('.t').textContent = `${a.time} · ${a.severity}`;
+        item.querySelector('.s').textContent = a.summary || '';
+        item.querySelector('.r').textContent = a.response || '';
         alertBody.appendChild(item);
       }
     }
 
+    async function pollNotices() {
+      try {
+        const notices = await fetch('/api/notices?since=' + lastNoticeId).then(r => r.json());
+        for (const notice of notices) {
+          lastNoticeId = Math.max(lastNoticeId, Number(notice.id || 0));
+          if (notice.kind === 'virtualhome_sync' || notice.kind === 'virtualhome') continue;
+          if (notice.message) {
+            const cls = notice.kind === 'virtualhome_abnormal' ? 'notice alert' : 'notice';
+            addMsg('agent', notice.message, cls);
+          }
+        }
+      } catch (e) {}
+    }
+
     async function poll() {
       try {
-        const [s, a] = await Promise.all([
+        const [s, a, mode] = await Promise.all([
           fetch('/api/state').then(r => r.json()),
-          fetch('/api/alerts').then(r => r.json())
+          fetch('/api/alerts').then(r => r.json()),
+          fetch('/api/home-mode').then(r => r.json())
         ]);
+        renderMode(mode.mode || currentMode);
         renderState(s);
         renderAlerts(a);
-      } catch (e) { /* 忽略轮询错误 */ }
+        pollNotices();
+      } catch (e) {}
     }
 
-    // 场景列表
-    async function loadScenes() {
-      const scenes = await fetch('/api/scenes').then(r => r.json());
-      for (const s of scenes) {
-        const opt = document.createElement('option');
-        opt.value = s; opt.textContent = s;
-        sceneSelect.appendChild(opt);
-      }
+    for (const button of modeButtons) {
+      button.onclick = () => setMode(button.dataset.mode);
     }
-    applyScene.onclick = async () => {
-      await fetch('/api/scene', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({scene: sceneSelect.value})
-      });
-    };
-
-    loadScenes();
+    sendBtn.onclick = send;
+    question.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+    loadMode();
     poll();
     setInterval(poll, 2000);
   </script>

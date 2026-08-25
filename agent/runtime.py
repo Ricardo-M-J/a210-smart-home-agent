@@ -11,14 +11,16 @@ import config
 from agent import Agent
 from event_engine import EventEngine
 from memory import Memory
-from simulator import PerceptionSimulator
 from tools.reader import read_home_state
 
 _agent: Agent | None = None
-_simulator: PerceptionSimulator | None = None
+_simulator: object | None = None
 _monitor: "EventMonitor | None" = None
 _alerts: list[dict] = []
 _alerts_lock = threading.Lock()
+_notices: list[dict] = []
+_notices_lock = threading.Lock()
+_notice_id = 0
 
 
 def push_alert(severity: str, summary: str, response: str) -> None:
@@ -32,6 +34,23 @@ def push_alert(severity: str, summary: str, response: str) -> None:
     with _alerts_lock:
         _alerts.append(alert)
         del _alerts[:-100]
+
+
+def push_notice(kind: str, message: str, payload: dict | None = None) -> dict:
+    """Push an Agent-side proactive chat notice for the Web UI."""
+    global _notice_id
+    with _notices_lock:
+        _notice_id += 1
+        notice = {
+            "id": _notice_id,
+            "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "kind": kind,
+            "message": message,
+            "payload": payload or {},
+        }
+        _notices.append(notice)
+        del _notices[:-100]
+        return notice
 
 
 class EventMonitor(threading.Thread):
@@ -73,12 +92,14 @@ def get_agent() -> Agent:
     return _agent
 
 
-def get_simulator() -> PerceptionSimulator | None:
+def get_simulator() -> object | None:
     """返回模拟感知进程。上板 real 模式返回 None（由队友真实进程接管）。"""
     global _simulator
-    if config.BACKEND == "real":
+    if config.BACKEND.lower() in {"real", "virtualhome"}:
         return None
     if _simulator is None:
+        from simulator import PerceptionSimulator
+
         _simulator = PerceptionSimulator()
         _simulator.write_once()  # 先同步写一次快照，避免监控线程读到残留旧文件
         _simulator.start()
@@ -102,3 +123,9 @@ def start() -> None:
 def get_alerts(limit: int = 50) -> list[dict]:
     with _alerts_lock:
         return list(_alerts[-limit:])
+
+
+def get_notices(since: int = 0, limit: int = 50) -> list[dict]:
+    with _notices_lock:
+        rows = [notice for notice in _notices if int(notice.get("id", 0)) > since]
+        return rows[-limit:]

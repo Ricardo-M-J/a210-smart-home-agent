@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VirtualHome Feedback Action",
+  "type": "object",
+  "required": ["schema", "source", "action", "room", "target", "value", "reason"],
+  "properties": {
+    "schema": {"const": "virtualhome.feedback.v1"},
+    "source": {"type": "string"},
+    "scene": {"type": "string"},
+    "room": {"type": "string"},
+    "timestamp": {"type": "number"},
+    "action": {
+      "enum": [
+        "set_light",
+        "set_device",
+        "set_environment",
+        "raise_alert",
+        "raise_alert_and_set_light",
+        "notify_bluetooth_device",
+        "place_call",
+        "send_message",
+        "none"
+      ]
+    },
+    "target": {"type": "string"},
+    "value": {"type": "string"},
+    "reason": {"type": "string"},
+    "payload": {"type": "object"}
+  },
+  "additionalProperties": true
+}

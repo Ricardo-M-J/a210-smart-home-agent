@@ -49,9 +49,14 @@ def run(conclusion: str, action: str, message: str) -> dict:
         # 告警推入 Web 面板，闭合「决策 → 告警 → 可视化」
         runtime.push_alert("alert", conclusion, message)
 
+    from tools.backend import get_backend
+
+    feedback = get_backend().apply_feedback(conclusion, action, message, record)
+
     return {
         "status": "ok",
         "alert": alert,
         "record": record,
+        "feedback": feedback,
         "note": "已触发告警" if alert else "已记录决策",
     }

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VirtualHome Bluetooth Action Placeholder",
+  "type": "object",
+  "required": ["schema", "scene", "timestamp", "transport", "device_type", "device_id", "action", "payload"],
+  "properties": {
+    "schema": {"const": "virtualhome.bluetooth_action.v1"},
+    "scene": {"type": "string"},
+    "timestamp": {"type": "number", "minimum": 0},
+    "transport": {
+      "enum": ["ble_placeholder", "bluetooth_low_energy", "local_demo"]
+    },
+    "device_type": {
+      "enum": ["smart_watch", "mobile_phone", "smart_band", "gateway"]
+    },
+    "device_id": {"type": "string"},
+    "action": {
+      "enum": ["vibrate_and_prompt", "prepare_emergency_contact", "place_call", "send_message", "notify"]
+    },
+    "payload": {"type": "object"}
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "A210 Agent Response For VirtualHome",
+  "type": "object",
+  "required": ["schema", "status", "backend", "scene", "home_state", "feedback_action"],
+  "properties": {
+    "schema": {"const": "a210.agent_response.v1"},
+    "status": {"enum": ["ok", "error"]},
+    "backend": {"const": "virtualhome"},
+    "scene": {"type": "string"},
+    "home_state": {"type": "object"},
+    "feedback_action": {"type": "object"},
+    "feedback_path": {"type": "string"},
+    "error": {"type": "string"}
+  },
+  "additionalProperties": true
+}

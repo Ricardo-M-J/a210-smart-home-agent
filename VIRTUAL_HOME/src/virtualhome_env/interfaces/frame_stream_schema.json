@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VirtualHome Frame Stream Message",
+  "type": "object",
+  "required": ["schema", "stream_id", "scene", "room", "camera_id", "frame_index", "timestamp", "resolution", "fps", "image"],
+  "properties": {
+    "schema": {"const": "virtualhome.frame.v1"},
+    "stream_id": {"type": "string"},
+    "scene": {"type": "string"},
+    "room": {"type": "string"},
+    "camera_id": {"type": "integer", "minimum": 0},
+    "frame_index": {"type": "integer", "minimum": 0},
+    "timestamp": {"type": "number", "minimum": 0},
+    "resolution": {
+      "type": "array",
+      "prefixItems": [{"const": 1280}, {"const": 720}],
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "fps": {"const": 10},
+    "image": {
+      "type": "object",
+      "required": ["encoding", "mime", "path"],
+      "properties": {
+        "encoding": {"const": "jpg"},
+        "mime": {"const": "image/jpeg"},
+        "path": {"type": "string"}
+      }
+    }
+  }
+}

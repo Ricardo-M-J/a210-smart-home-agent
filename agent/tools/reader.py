@@ -12,6 +12,11 @@ import config
 
 def read_home_state() -> dict:
     """读取家居状态快照。文件不存在或解析失败时返回空快照（降级）。"""
+    if config.BACKEND.lower() == "virtualhome":
+        from tools.backend import get_backend
+
+        return get_backend().home_state()
+
     path = Path(config.HOME_STATE_FILE)
     if not path.exists():
         return {"error": "暂无家居状态数据，感知进程尚未写入快照"}

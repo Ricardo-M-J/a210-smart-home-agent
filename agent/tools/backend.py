@@ -27,6 +27,37 @@ class Backend:
         raise NotImplementedError
 
 
+    def home_state(self) -> dict:
+        """Return the current home-state snapshot for monitor polling."""
+        raise NotImplementedError
+
+    def apply_feedback(self, conclusion: str, action: str, message: str, record: dict | None = None) -> dict:
+        """Optionally send an agent decision back to the environment."""
+        return {"status": "ignored", "detail": "backend does not support scene feedback"}
+
+    def list_scenes(self) -> list[str]:
+        return []
+
+    def set_scene(self, scene: str) -> bool:
+        return False
+
+    def ingest_virtualhome_frame(self, payload: dict) -> dict:
+        return {"status": "ignored", "detail": "backend does not accept VirtualHome frames"}
+
+    def latest_feedback(self, limit: int = 20) -> list[dict]:
+        return []
+
+    def control_virtualhome(
+        self,
+        room: str,
+        device: str,
+        command: str,
+        value: str | None = None,
+        source_text: str | None = None,
+    ) -> dict:
+        return {"status": "ignored", "detail": "backend does not support VirtualHome controls"}
+
+
 class MockBackend(Backend):
     """Mock 后端：无真实摄像头/YOLO，用快照文件代表画面与检测结果。"""
 
@@ -61,6 +92,23 @@ class MockBackend(Backend):
         }
 
 
+    def home_state(self) -> dict:
+        return self._state()
+
+    def list_scenes(self) -> list[str]:
+        from mock import SCENARIOS
+
+        return list(SCENARIOS.keys())
+
+    def set_scene(self, scene: str) -> bool:
+        from mock import SCENARIOS, write_scene
+
+        if scene not in SCENARIOS:
+            return False
+        write_scene(scene)
+        return True
+
+
 class RealBackend(Backend):
     """真实后端：上板后读队友 C++ 写的全屋快照文件。
 
@@ -93,8 +141,61 @@ class RealBackend(Backend):
         }
 
 
+    def home_state(self) -> dict:
+        return self._state()
+
+
+class VirtualHomeBackend(Backend):
+    """VirtualHome backend: consume virtual camera frames and scene result JSONL files."""
+
+    def __init__(self):
+        from tools.virtualhome_adapter import VirtualHomeAdapter
+
+        self.adapter = VirtualHomeAdapter.from_config()
+
+    def capture(self) -> dict:
+        return self.adapter.capture()
+
+    def latest_frame(self) -> dict:
+        return self.adapter.latest_frame()
+
+    def infer(self) -> dict:
+        return self.adapter.infer()
+
+    def home_state(self) -> dict:
+        return self.adapter.home_state()
+
+    def apply_feedback(self, conclusion: str, action: str, message: str, record: dict | None = None) -> dict:
+        return self.adapter.apply_feedback(conclusion, action, message, record)
+
+    def list_scenes(self) -> list[str]:
+        return self.adapter.list_scenes()
+
+    def set_scene(self, scene: str) -> bool:
+        return self.adapter.set_scene(scene)
+
+    def ingest_virtualhome_frame(self, payload: dict) -> dict:
+        return self.adapter.ingest_frame(payload)
+
+    def latest_feedback(self, limit: int = 20) -> list[dict]:
+        return self.adapter.latest_feedback(limit)
+
+    def control_virtualhome(
+        self,
+        room: str,
+        device: str,
+        command: str,
+        value: str | None = None,
+        source_text: str | None = None,
+    ) -> dict:
+        return self.adapter.control_device(room, device, command, value, source_text)
+
+
 def get_backend() -> Backend:
     """按配置返回后端实例。"""
-    if config.BACKEND == "real":
+    backend = config.BACKEND.lower()
+    if backend == "real":
         return RealBackend()
+    if backend == "virtualhome":
+        return VirtualHomeBackend()
     return MockBackend()

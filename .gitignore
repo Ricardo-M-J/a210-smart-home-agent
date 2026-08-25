@@ -23,3 +23,26 @@ yolo/agent-butler_K_copy_20260821/install/
 
 # 内部接手文档（早期探索/已废弃思路，不对外）
 a210-handoff.md
+
+# VirtualHome runtime outputs and generated demo artifacts.
+VIRTUAL_HOME/outputs/
+
+# Legacy experiments kept locally; current system uses VIRTUAL_HOME/src, demo, docs, assets, vhome, windows_exec.
+VIRTUAL_HOME/archive/
+
+# Nested upstream Git metadata is removed before vendoring.
+VIRTUAL_HOME/virtualhome/.git/
+VIRTUAL_HOME/virtualhome_unity_project/.git/
+
+# Unity local cache and machine-specific editor state.
+VIRTUAL_HOME/virtualhome_unity_project/[Ll]ibrary/
+VIRTUAL_HOME/virtualhome_unity_project/[Ll]ogs/
+VIRTUAL_HOME/virtualhome_unity_project/[Tt]emp/
+VIRTUAL_HOME/virtualhome_unity_project/[Uu]ser[Ss]ettings/
+VIRTUAL_HOME/virtualhome_unity_project/obj/
+VIRTUAL_HOME/virtualhome_unity_project/[Bb]uild/
+VIRTUAL_HOME/virtualhome_unity_project/[Bb]uilds/
+
+# GitHub LFS rejects this Unity runtime resource on the current 2GB per-file limit.
+# Keep it locally or restore it from the external VirtualHome package.
+VIRTUAL_HOME/windows_exec/**/VirtualHome_Data/resources.assets.resS
