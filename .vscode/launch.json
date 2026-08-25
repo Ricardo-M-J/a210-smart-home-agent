@@ -11,6 +11,10 @@
       "console": "integratedTerminal",
       "env": {
         "BACKEND": "virtualhome",
+        "VIRTUAL_HOME_DIR": "${workspaceFolder}\\VIRTUAL_HOME",
+        "VIRTUAL_HOME_PYTHON": "${workspaceFolder}\\VIRTUAL_HOME\\vhome\\Scripts\\python.exe",
+        "VIRTUAL_HOME_UNITY_CONTROL": "1",
+        "VIRTUAL_HOME_UNITY_PORT": "8080",
         "WEB_PORT": "8019"
       },
       "justMyCode": true

@@ -81,18 +81,21 @@ def available_music_tracks() -> list[str]:
 
 def normalize_music_query(text: str) -> str:
     normalized = str(text or "").strip().lower().replace(" ", "")
+    for token in ("播放", "放一下", "放", "开始", "音乐", "歌曲", "曲目", "歌", "首", "音箱", "全屋", "一下"):
+        normalized = normalized.replace(token, "")
     for token in ("play", "music", "track", "song", "speaker"):
         normalized = normalized.replace(token, "")
-    for token in ("-", "_", ",", ".", ":", ";", "\"", "'"):
+    for token in ("-", "_", ",", ".", ":", ";", "\"", "'", "，", "。", "：", "；", "《", "》", "“", "”"):
         normalized = normalized.replace(token, "")
     return normalized
 
 
 def resolve_music_track(value: str | None) -> str:
     requested = normalize_music_query(str(value or ""))
+    tracks = available_music_tracks()
     if not requested:
-        return ""
-    for track in available_music_tracks():
+        return tracks[0] if tracks else ""
+    for track in tracks:
         candidate = normalize_music_query(track)
         if requested == candidate or requested in candidate or candidate in requested:
             return track
@@ -109,7 +112,11 @@ def normalize_device_state(state: dict[str, Any]) -> dict[str, Any]:
     lights = normalized.get("lights") if isinstance(normalized.get("lights"), dict) else {}
     for target, value in LIGHT_DEFAULTS.items():
         lights.setdefault(target, value)
+    for target, raw_value in list(lights.items()):
+        text = str(raw_value or "").strip().lower()
+        lights[target] = "off" if text in {"off", "close", "turn_off", "0", "false"} else "on"
     normalized["lights"] = lights
+    normalized.pop("light_modes", None)
 
     speakers = normalized.get("speakers") if isinstance(normalized.get("speakers"), dict) else {}
     whole = speakers.get(WHOLE_HOME_SPEAKER)

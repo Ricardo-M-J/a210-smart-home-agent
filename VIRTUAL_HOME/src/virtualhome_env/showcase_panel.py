@@ -51,7 +51,6 @@ PANEL_OUTPUT_DIR = OUTPUT_ROOT / "showcase_panel"
 LIVE_CAMERA_PORT = "8080"
 LIVE_CAMERA_SIZE = (1280, 720)
 AGENT_URL = os.environ.get("A210_AGENT_URL", "http://127.0.0.1:8019").rstrip("/")
-SHOW_AGENT_DEVICE_OVERLAY = os.environ.get("SHOW_AGENT_DEVICE_OVERLAY", "0").strip().lower() in {"1", "true", "yes", "on"}
 DEVICE_STATE_FILE = OUTPUT_ROOT / "agent_bridge" / "simulated_device_state.json"
 PANEL_AGENT_RESPONSE_FILE = OUTPUT_ROOT / "agent_bridge" / "panel_agent_responses.jsonl"
 ACTIVE_MUSIC_PLAYER_FILE = OUTPUT_ROOT / "agent_bridge" / "active_music_player.json"
@@ -68,6 +67,14 @@ AGENT_TIMELINE_SPEED = float(os.environ.get("A210_AGENT_TIMELINE_SPEED", "1.0"))
 ROOMS = ("living_room", "bedroom", "kitchen", "bathroom")
 LIGHT_DEFAULTS = {f"{room}_ceiling_light": "on" for room in ROOMS}
 WHOLE_HOME_SPEAKER = "whole_home_speaker"
+HEALTH_MUSIC_START = 8.0
+HEALTH_RECOVERY_AT = 38.0
+ROOM_CAMERA_STREAMS = (
+    {"room": "living_room", "stream_id": "livingroom_camera_0", "camera_id": 0},
+    {"room": "bedroom", "stream_id": "bedroom_camera_0", "camera_id": 0},
+    {"room": "kitchen", "stream_id": "kitchen_camera_0", "camera_id": 0},
+    {"room": "bathroom", "stream_id": "bathroom_camera_0", "camera_id": 0},
+)
 MUSIC_EXTENSIONS = (".wav", ".mp3", ".flac", ".ogg", ".m4a")
 _MUSIC_DIR_RAW = os.environ.get("VIRTUAL_HOME_MUSIC_DIR", "")
 MUSIC_DIR = Path(_MUSIC_DIR_RAW) if _MUSIC_DIR_RAW else REPO_ROOT / "assets" / "music"
@@ -108,8 +115,6 @@ def available_music_tracks() -> List[str]:
 
 def resolve_music_path(track: str) -> Optional[Path]:
     requested = normalize_music_query(track)
-    if not requested:
-        return None
     files: List[Path] = []
     if not MUSIC_DIR.exists():
         return None
@@ -123,6 +128,8 @@ def resolve_music_path(track: str) -> Optional[Path]:
         return None
     if not files:
         return None
+    if not requested:
+        return files[0]
     for path in files:
         candidates = {
             normalize_music_query(path.stem),
@@ -147,6 +154,8 @@ def normalize_music_query(text: str) -> str:
         "音乐",
         "歌曲",
         "曲目",
+        "歌",
+        "首",
         "音箱",
         "全屋",
         "一下",
@@ -160,6 +169,48 @@ def normalize_music_query(text: str) -> str:
     for token in ("-", "_", "，", ",", "。", ".", "：", ":", "《", "》", "“", "”", "\"", "'"):
         normalized = normalized.replace(token, "")
     return normalized
+
+
+def smoothstep(value: float) -> float:
+    value = max(0.0, min(1.0, value))
+    return value * value * (3.0 - 2.0 * value)
+
+
+def apply_light_state_to_image(image: Image.Image, light_state: object) -> Image.Image:
+    state = str(light_state or "on").strip().lower()
+    base = image.convert("RGB")
+    if state == "off":
+        shadow = Image.new("RGB", base.size, "#05070a")
+        return Image.blend(base, shadow, 0.58)
+    return base
+
+
+def health_state_at(timestamp: float) -> Tuple[int, float, str]:
+    if timestamp < 5.0:
+        return 76 + int(math.sin(timestamp * 2.0) * 2), 0.10, "calm"
+    if timestamp < HEALTH_MUSIC_START:
+        progress = smoothstep((timestamp - 5.0) / (HEALTH_MUSIC_START - 5.0))
+        heart_rate = int(78 + 40 * progress + math.sin(timestamp * 6.0) * 2)
+        anxiety = 0.18 + 0.70 * progress
+        return heart_rate, anxiety, "anxiety_detected" if heart_rate >= 112 else "heart_rate_rising"
+    if timestamp < HEALTH_RECOVERY_AT:
+        progress = smoothstep((timestamp - HEALTH_MUSIC_START) / (HEALTH_RECOVERY_AT - HEALTH_MUSIC_START))
+        heart_rate = int(118 - 35 * progress + math.sin(timestamp * 2.2) * 2)
+        anxiety = 0.88 - 0.65 * progress
+        return heart_rate, anxiety, "relief_active"
+    return 78 + int(math.sin(timestamp * 2.0) * 2), 0.12, "calm_recovered"
+
+
+def health_event_name(state: str) -> str:
+    if state == "anxiety_detected":
+        return "anxiety_detected"
+    if state == "heart_rate_rising":
+        return "heart_rate_rising"
+    if state == "relief_active":
+        return "anxiety_relief_active"
+    if state == "calm_recovered":
+        return "health_recovered"
+    return "health_monitoring"
 
 
 class MciAudioPlayer:
@@ -366,7 +417,11 @@ def normalize_device_state(state: Dict[str, object]) -> Dict[str, object]:
     lights = normalized.get("lights") if isinstance(normalized.get("lights"), dict) else {}
     for target, value in LIGHT_DEFAULTS.items():
         lights.setdefault(target, value)
+    for target, raw_value in list(lights.items()):
+        text = str(raw_value or "").strip().lower()
+        lights[target] = "off" if text in {"off", "close", "turn_off", "0", "false"} else "on"
     normalized["lights"] = lights
+    normalized.pop("light_modes", None)
 
     speakers = normalized.get("speakers") if isinstance(normalized.get("speakers"), dict) else {}
     whole = speakers.get(WHOLE_HOME_SPEAKER) if isinstance(speakers, dict) else None
@@ -490,6 +545,126 @@ def bluetooth_action(
     }
 
 
+def canonical_room_name(value: object) -> str:
+    key = str(value or "").strip().lower().replace("-", "_")
+    aliases = {"livingroom": "living_room", "living_room": "living_room"}
+    key = aliases.get(key, key)
+    return key if key in ROOMS else ""
+
+
+def safe_count(value: object, default: int = 0) -> int:
+    try:
+        return max(0, int(float(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def yolo_person_camera_results(
+    scene: str,
+    person_counts: Optional[Dict[str, int]] = None,
+    unknown_counts: Optional[Dict[str, int]] = None,
+    frame_index: int = 0,
+    timestamp: float = 0.0,
+) -> List[Dict[str, object]]:
+    counts = {room: 0 for room in ROOMS}
+    unknown = {room: 0 for room in ROOMS}
+
+    for room_key, count in (person_counts or {}).items():
+        room = canonical_room_name(room_key)
+        if room:
+            counts[room] = safe_count(count)
+    for room_key, count in (unknown_counts or {}).items():
+        room = canonical_room_name(room_key)
+        if room:
+            unknown[room] = min(counts[room], safe_count(count))
+
+    rows: List[Dict[str, object]] = []
+    for camera in ROOM_CAMERA_STREAMS:
+        room = str(camera["room"])
+        person_count = counts[room]
+        unknown_count = unknown[room]
+        detections = [
+            {
+                "label": "person",
+                "class_id": 0,
+                "confidence": 0.91,
+                "track_id": f"{camera['stream_id']}_person_{index}",
+            }
+            for index in range(person_count)
+        ]
+        rows.append(
+            {
+                "schema": "external.vision_result.v1",
+                "source": "placeholder_yolov11_or_a210",
+                "scene": scene,
+                "room": room,
+                "stream_id": camera["stream_id"],
+                "camera_id": camera["camera_id"],
+                "frame_index": frame_index,
+                "timestamp": round(timestamp, 3),
+                "person_count": person_count,
+                "known_resident_count": max(0, person_count - unknown_count),
+                "unknown_person_count": unknown_count,
+                "has_person": person_count > 0,
+                "detections": detections,
+            }
+        )
+    return rows
+
+
+def with_yolo_person_camera_interface(
+    result: Dict[str, object],
+    scene: str,
+    person_counts: Optional[Dict[str, int]] = None,
+    unknown_counts: Optional[Dict[str, int]] = None,
+    frame_index: int = 0,
+    timestamp: float = 0.0,
+) -> Dict[str, object]:
+    enriched = json.loads(json.dumps(result, ensure_ascii=False))
+    counts = {room: 0 for room in ROOMS}
+    for room_key, count in (person_counts or {}).items():
+        room = canonical_room_name(room_key)
+        if room:
+            counts[room] = safe_count(count)
+
+    enriched["camera_results"] = yolo_person_camera_results(
+        scene=scene,
+        person_counts=counts,
+        unknown_counts=unknown_counts,
+        frame_index=frame_index,
+        timestamp=timestamp,
+    )
+    enriched["room_person_counts"] = counts
+
+    target_room = canonical_room_name(enriched.get("room"))
+    if target_room:
+        enriched["person_count"] = counts[target_room]
+    elif "person_count" not in enriched:
+        enriched["person_count"] = sum(counts.values())
+    return enriched
+
+
+def scenario_person_counts(scenario: "ShowcaseScenario", result: Dict[str, object]) -> Dict[str, int]:
+    count = safe_count(result.get("person_count"))
+    if scenario.key == "away_mode_stranger":
+        return {"living_room": count}
+
+    room = canonical_room_name(scenario.room)
+    if room:
+        return {room: count}
+
+    room_counts = result.get("room_person_counts")
+    if isinstance(room_counts, dict):
+        return {canonical_room_name(room): safe_count(value) for room, value in room_counts.items() if canonical_room_name(room)}
+    return {}
+
+
+def scenario_unknown_counts(scenario: "ShowcaseScenario", result: Dict[str, object]) -> Dict[str, int]:
+    if scenario.key != "away_mode_stranger":
+        return {}
+    return {"living_room": safe_count(result.get("unknown_person_count"))}
+
+
 # 这里集中维护最终展示按钮。后续想增加 demo，只需要补一个 ShowcaseScenario。
 SCENARIOS: List[ShowcaseScenario] = [
     ShowcaseScenario(
@@ -501,13 +676,16 @@ SCENARIOS: List[ShowcaseScenario] = [
         media_type="image",
         stream_id="whole_home_overview_camera",
         category="ENVIRONMENT",
-        expected_external_result={
-            "schema": "external.vision_result.v1",
-            "source": "placeholder_yolov11_or_a210",
-            "room": "all_rooms",
-            "room_count": 4,
-            "status": "whole_home_overview_ready",
-        },
+        expected_external_result=with_yolo_person_camera_interface(
+            {
+                "schema": "external.vision_result.v1",
+                "source": "placeholder_yolov11_or_a210",
+                "room": "all_rooms",
+                "room_count": 4,
+                "status": "whole_home_overview_ready",
+            },
+            scene="whole_home_overview",
+        ),
         feedback_action=feedback_action(
             scene="whole_home_overview",
             room="all_rooms",
@@ -526,16 +704,19 @@ SCENARIOS: List[ShowcaseScenario] = [
         media_type="image",
         stream_id="multi_room_camera_preview",
         category="CAMERAS",
-        expected_external_result={
-            "schema": "external.vision_result.v1",
-            "source": "placeholder_yolov11_or_a210",
-            "room": "all_rooms",
-            "room_count": 4,
-            "status": "room_camera_layout_ready",
-            "payload": {
-                "streams": ["bedroom_camera_0", "kitchen_camera_0", "livingroom_camera_0", "bathroom_camera_0"],
+        expected_external_result=with_yolo_person_camera_interface(
+            {
+                "schema": "external.vision_result.v1",
+                "source": "placeholder_yolov11_or_a210",
+                "room": "all_rooms",
+                "room_count": 4,
+                "status": "room_camera_layout_ready",
+                "payload": {
+                    "streams": ["livingroom_camera_0", "bedroom_camera_0", "kitchen_camera_0", "bathroom_camera_0"],
+                },
             },
-        },
+            scene="multi_camera_layout",
+        ),
         feedback_action=feedback_action(
             scene="multi_camera_layout",
             room="all_rooms",
@@ -558,16 +739,20 @@ SCENARIOS: List[ShowcaseScenario] = [
         media_type="video",
         stream_id="bedroom_camera_0",
         category="CLOSED LOOP",
-        expected_external_result={
-            "schema": "external.vision_result.v1",
-            "source": "placeholder_yolov11_or_a210",
-            "room": "bedroom",
-            "timeline": [
-                {"frame": 56, "t": 5.6, "person_count": 1, "event": "person_entered"},
-                {"frame": 181, "t": 18.1, "person_count": 0, "event": "person_left"},
-                {"frame": 185, "t": 18.5, "person_count": 0, "event": "person_left_light_off"},
-            ],
-        },
+        expected_external_result=with_yolo_person_camera_interface(
+            {
+                "schema": "external.vision_result.v1",
+                "source": "placeholder_yolov11_or_a210",
+                "room": "bedroom",
+                "timeline": [
+                    {"frame": 56, "t": 5.6, "person_count": 1, "event": "person_entered"},
+                    {"frame": 181, "t": 18.1, "person_count": 0, "event": "person_left"},
+                    {"frame": 185, "t": 18.5, "person_count": 0, "event": "person_left_light_off"},
+                ],
+            },
+            scene="bedroom_person",
+            person_counts={"bedroom": 0},
+        ),
         feedback_action=feedback_action(
             scene="bedroom_person",
             room="bedroom",
@@ -590,21 +775,25 @@ SCENARIOS: List[ShowcaseScenario] = [
         media_type="video",
         stream_id="kitchen_camera_0",
         category="CLOSED LOOP",
-        expected_external_result={
-            "schema": "external.vision_result.v1",
-            "source": "placeholder_yolov11_or_a210",
-            "room": "kitchen",
-            "smart_home_mode": "normal",
-            "person_count": 0,
-            "pet_type": "cat",
-            "pet_count": 1,
-            "event": "pet_unattended_alert_light_off",
-            "timeline": [
-                {"frame": 0, "t": 0.0, "person_count": 1, "pet_count": 1, "event": "owner_entered_kitchen"},
-                {"frame": 62, "t": 6.2, "person_count": 0, "pet_count": 1, "event": "kitchen_unmanned_pet_present"},
-                {"frame": 67, "t": 6.7, "person_count": 0, "pet_count": 1, "event": "pet_unattended_alert_light_off"},
-            ],
-        },
+        expected_external_result=with_yolo_person_camera_interface(
+            {
+                "schema": "external.vision_result.v1",
+                "source": "placeholder_yolov11_or_a210",
+                "room": "kitchen",
+                "smart_home_mode": "normal",
+                "person_count": 0,
+                "pet_type": "cat",
+                "pet_count": 1,
+                "event": "pet_unattended_alert_light_off",
+                "timeline": [
+                    {"frame": 0, "t": 0.0, "person_count": 1, "pet_count": 1, "event": "owner_entered_kitchen"},
+                    {"frame": 62, "t": 6.2, "person_count": 0, "pet_count": 1, "event": "kitchen_unmanned_pet_present"},
+                    {"frame": 67, "t": 6.7, "person_count": 0, "pet_count": 1, "event": "pet_unattended_alert_light_off"},
+                ],
+            },
+            scene="kitchen_pet",
+            person_counts={"kitchen": 0},
+        ),
         feedback_action=feedback_action(
             scene="kitchen_pet",
             room="kitchen",
@@ -646,16 +835,20 @@ SCENARIOS: List[ShowcaseScenario] = [
         media_type="video",
         stream_id="kitchen_camera_0",
         category="SAFETY",
-        expected_external_result={
-            "schema": "external.vision_result.v1",
-            "source": "placeholder_yolov11_or_a210",
-            "room": "kitchen",
-            "person_count": 0,
-            "hazard_detected": True,
-            "hazard_type": "fire_smoke",
-            "risk_level": "critical",
-            "event": "fire_smoke_detected",
-        },
+        expected_external_result=with_yolo_person_camera_interface(
+            {
+                "schema": "external.vision_result.v1",
+                "source": "placeholder_yolov11_or_a210",
+                "room": "kitchen",
+                "person_count": 0,
+                "hazard_detected": True,
+                "hazard_type": "fire_smoke",
+                "risk_level": "critical",
+                "event": "fire_smoke_detected",
+            },
+            scene="fire_smoke",
+            person_counts={"kitchen": 0},
+        ),
         feedback_action=feedback_action(
             scene="fire_smoke",
             room="kitchen",
@@ -679,31 +872,40 @@ SCENARIOS: List[ShowcaseScenario] = [
     ShowcaseScenario(
         key="health_event",
         title="健康助手",
-        purpose="普通状态为暖光；心率升高后切换冷光并播放预设音乐，手机显示缓解焦虑提示；30s 后恢复暖光并停止音乐。",
+        purpose="普通状态平静；心率升高并检测到异常健康数据后播放预设音乐；心率回落后恢复平静，音乐保持播放，直到用户在 Agent 端发出停止音乐命令。",
         room="bedroom",
         media_path=PANEL_OUTPUT_DIR / "health_event" / "health_assistant.mp4",
         media_type="video",
         stream_id="bedroom_camera_0",
         category="WEARABLE",
-        expected_external_result={
-            "schema": "external.health_event.v1",
-            "source": "wearable_or_agent_placeholder",
-            "room": "bedroom",
-            "event": "anxiety_detected",
-            "payload": {"heart_rate": 118, "anxiety_score": 0.88, "confidence": 0.91},
-        },
+        expected_external_result=with_yolo_person_camera_interface(
+            {
+                "schema": "external.health_event.v1",
+                "source": "wearable_or_agent_placeholder",
+                "room": "bedroom",
+                "stream_id": "bedroom_camera_0",
+                "person_count": 1,
+                "known_resident_count": 1,
+                "event": "anxiety_detected",
+                "payload": {"heart_rate": 118, "anxiety_score": 0.88, "confidence": 0.91, "health_state": "anxiety_detected"},
+            },
+            scene="health_event",
+            person_counts={"bedroom": 1},
+        ),
         feedback_action=feedback_action(
             scene="health_event",
             room="bedroom",
-            action="set_environment",
-            target="bedroom_ambient_light_and_whole_home_music",
-            value="anxiety_relief_mode",
+            action="set_device",
+            target=WHOLE_HOME_SPEAKER,
+            value="play",
             reason="wearable_detected_anxiety_high_heart_rate",
             payload={
-                "light": "cool_blue",
                 "music": "伊藤サチコ - いつも何度でも",
+                "track": "伊藤サチコ - いつも何度でも",
                 "music_scope": "whole_home",
                 "music_source": "health_event",
+                "heart_rate": 118,
+                "anxiety_score": 0.88,
                 "agent_message": "检测到心率升高，建议进行 4-7-8 呼吸，并播放舒缓音乐。",
                 "transport": "agent_feedback_placeholder",
             },
@@ -718,7 +920,7 @@ SCENARIOS: List[ShowcaseScenario] = [
                 payload={
                     "event": "anxiety_relief_started",
                     "title": "健康助手",
-                    "message": "检测到心率升高。请跟随 4-7-8 呼吸，放松肩颈，音乐将在 30 秒后自动关闭。",
+                    "message": "检测到心率升高。请跟随 4-7-8 呼吸，放松肩颈；音乐会持续播放，直到在 Agent 端停止。",
                     "heart_rate": 118,
                     "anxiety_score": 0.88,
                     "mode": "demo_only",
@@ -736,17 +938,22 @@ SCENARIOS: List[ShowcaseScenario] = [
         media_type="video",
         stream_id="whole_home_overview_camera",
         category="SECURITY",
-        expected_external_result={
-            "schema": "external.security_result.v1",
-            "source": "placeholder_yolov11_or_a210",
-            "room": "all_rooms",
-            "smart_home_mode": "agent_home_mode_dependent",
-            "person_count": 1,
-            "known_resident_count": 0,
-            "unknown_person_count": 1,
-            "alarm_active": False,
-            "event": "person_entered_home",
-        },
+        expected_external_result=with_yolo_person_camera_interface(
+            {
+                "schema": "external.security_result.v1",
+                "source": "placeholder_yolov11_or_a210",
+                "room": "all_rooms",
+                "smart_home_mode": "agent_home_mode_dependent",
+                "person_count": 1,
+                "known_resident_count": 0,
+                "unknown_person_count": 1,
+                "alarm_active": False,
+                "event": "person_entered_home",
+            },
+            scene="away_mode_stranger",
+            person_counts={"living_room": 1},
+            unknown_counts={"living_room": 1},
+        ),
         feedback_action=feedback_action(
             scene="away_mode_stranger",
             room="all_rooms",
@@ -906,6 +1113,7 @@ def export_interface_samples(output_dir: Path = PANEL_OUTPUT_DIR) -> Path:
                 "",
                 "- `virtualhome_frame_stream_sample.jsonl`: JPG frame messages sent to edge vision.",
                 "- `external_result_sample.jsonl`: placeholder results expected from YOLO/A210/agent.",
+                "  Each result may include `camera_results` and `room_person_counts` for per-room camera person detection.",
                 "- `virtualhome_feedback_action_sample.jsonl`: actions VirtualHome can receive.",
                 "- `virtualhome_bluetooth_action_sample.jsonl`: demo-only BLE watch/phone actions.",
                 "- `showcase_scenarios.json`: local demo catalog.",
@@ -1379,7 +1587,6 @@ class ShowcasePanel:
 
     def show_scenario(self, scenario: ShowcaseScenario) -> None:
         self.stop_video()
-        self.stop_audio()
         self.stop_live_agent_stream()
         self.active_scenario = scenario
         self.current_stream_frame_path = None
@@ -1503,6 +1710,10 @@ class ShowcasePanel:
         if scenario.key == "away_mode_stranger":
             mode = self._agent_home_mode()
             return "person=1 unknown=1 mode=away" if mode == "away" else "person=1 mode=home"
+        camera_results = result.get("camera_results")
+        if isinstance(camera_results, list) and scenario.key == "multi_camera_layout":
+            total = sum(safe_count(item.get("person_count")) for item in camera_results if isinstance(item, dict))
+            return f"yolo cameras={len(camera_results)} person_total={total}"
         if "unknown_person_count" in result:
             return f"unknown={result.get('unknown_person_count')} mode={result.get('smart_home_mode')}"
         if "pet_count" in result:
@@ -1514,8 +1725,9 @@ class ShowcasePanel:
             return f"hazard={result.get('hazard_type')}"
         if result.get("schema") == "external.health_event.v1":
             payload = result.get("payload") or {}
+            person_count = result.get("person_count", 0)
             if isinstance(payload, dict):
-                return f"HR={payload.get('heart_rate')} anxiety={payload.get('anxiety_score')}"
+                return f"person={person_count} HR={payload.get('heart_rate')} anxiety={payload.get('anxiety_score')}"
             return str(result.get("event") or "health event")
         if "person_count" in result:
             return f"person_count={result.get('person_count')}"
@@ -1641,6 +1853,8 @@ class ShowcasePanel:
             self._apply_local_device_command("bedroom", "light", "on")
         elif scenario.key == "kitchen_pet":
             self._apply_local_device_command("kitchen", "light", "on")
+        elif scenario.key == "health_event":
+            self._apply_local_device_command("bedroom", "light", "on")
 
     def _send_live_agent_frame(self) -> None:
         scenario = self.active_scenario
@@ -1715,9 +1929,11 @@ class ShowcasePanel:
         result["scene"] = scenario.key
         if scenario.key == "away_mode_stranger":
             result = self._mode_adjusted_intrusion_result(result)
+        if scenario.key == "health_event":
+            result = self._health_result_for_elapsed(result, elapsed)
         timeline = result.get("timeline")
         if not isinstance(timeline, list) or not timeline:
-            return result
+            return self._with_current_yolo_camera_interface(scenario, result, elapsed)
 
         selected: Optional[Dict[str, object]] = None
         for item in timeline:
@@ -1736,12 +1952,47 @@ class ShowcasePanel:
                 compact.update({"person_count": 0, "event": "room_empty_light_on"})
             elif scenario.key == "kitchen_pet":
                 compact.update({"person_count": 1, "pet_count": 1, "pet_type": "cat", "event": "owner_entered_kitchen"})
-            return compact
+            return self._with_current_yolo_camera_interface(scenario, compact, elapsed)
 
         for key, value in selected.items():
             if key not in {"frame", "t"}:
                 compact[key] = value
-        return compact
+        return self._with_current_yolo_camera_interface(scenario, compact, elapsed)
+
+    def _with_current_yolo_camera_interface(
+        self,
+        scenario: ShowcaseScenario,
+        result: Dict[str, object],
+        elapsed: float,
+    ) -> Dict[str, object]:
+        return with_yolo_person_camera_interface(
+            result,
+            scene=scenario.key,
+            person_counts=scenario_person_counts(scenario, result),
+            unknown_counts=scenario_unknown_counts(scenario, result),
+            frame_index=self.current_media_frame_index,
+            timestamp=elapsed,
+        )
+
+    def _health_result_for_elapsed(self, result: Dict[str, object], elapsed: float) -> Dict[str, object]:
+        heart_rate, anxiety_score, health_state = health_state_at(elapsed)
+        updated = dict(result)
+        payload = updated.get("payload") if isinstance(updated.get("payload"), dict) else {}
+        payload = dict(payload)
+        payload.update(
+            {
+                "heart_rate": heart_rate,
+                "anxiety_score": round(anxiety_score, 2),
+                "confidence": 0.91 if health_state == "anxiety_detected" else 0.84,
+                "health_state": health_state,
+                "music_state": "on" if elapsed >= HEALTH_MUSIC_START else "off",
+            }
+        )
+        updated["event"] = health_event_name(health_state)
+        updated["payload"] = payload
+        updated["person_count"] = 1
+        updated["known_resident_count"] = 1
+        return updated
 
     def _mode_adjusted_intrusion_result(self, result: Dict[str, object]) -> Dict[str, object]:
         mode = self._agent_home_mode()
@@ -1784,7 +2035,7 @@ class ShowcasePanel:
         except (TypeError, ValueError):
             return default
 
-    def _apply_local_device_command(self, room: str, device: str, command: str) -> None:
+    def _apply_local_device_command(self, room: str, device: str, command: str, value: str = "") -> None:
         state = normalize_device_state(self._read_agent_device_state())
         state["updated_at"] = time.time()
 
@@ -1810,7 +2061,7 @@ class ShowcasePanel:
             from unity_device_controller import UnityDeviceController
 
             controller = UnityDeviceController(port=LIVE_CAMERA_PORT, timeout_wait=3)
-            controller.control(room, device, command)
+            controller.control(room, device, command, value)
         except Exception as exc:
             self._set_live_camera_status(f"Initial device sync failed: {exc}", error=True)
 
@@ -1896,7 +2147,8 @@ class ShowcasePanel:
         stream_dir = PANEL_OUTPUT_DIR / "live_agent_stream" / scenario.key
         stream_dir.mkdir(parents=True, exist_ok=True)
         latest_path = stream_dir / "latest.jpg"
-        image.save(latest_path, "JPEG", quality=92)
+        stream_image = self._apply_current_light_state(image)
+        stream_image.save(latest_path, "JPEG", quality=92)
         self.current_stream_frame_path = latest_path
         self.current_media_timestamp = timestamp
         self.current_media_frame_index = frame_index
@@ -2203,7 +2455,7 @@ class ShowcasePanel:
         max_w = max(240, canvas_w - 24)
         max_h = max(160, canvas_h - 24)
 
-        source = image
+        source = self._apply_current_light_state(image)
         base_scale = min(max_w / source.width, max_h / source.height)
         final_scale = max(0.05, base_scale * self.media_zoom)
         target_size = (
@@ -2226,8 +2478,6 @@ class ShowcasePanel:
             center_y + target_size[1] // 2,
         )
         self._draw_media_overlay(canvas_w, canvas_h, image_box)
-        if SHOW_AGENT_DEVICE_OVERLAY:
-            self._draw_agent_device_overlay(image_box)
         if self.active_scenario and (
             self.active_scenario.key in LIVE_CAMERA_SCENARIOS
             or self.current_stream_frame_path is not None
@@ -2256,93 +2506,18 @@ class ShowcasePanel:
             return normalize_device_state({})
         return normalize_device_state(value if isinstance(value, dict) else {})
 
-    def _draw_agent_device_overlay(self, image_box: Tuple[int, int, int, int]) -> None:
-        scenario_key = self.active_scenario.key if self.active_scenario is not None else ""
-        if scenario_key not in {"whole_home_overview", "multi_camera_layout"}:
-            return
+    def _apply_current_light_state(self, image: Image.Image) -> Image.Image:
+        scenario = self.active_scenario
+        if scenario is None:
+            return image
+        room = canonical_room_name(scenario.room)
+        if not room:
+            return image
 
         state = self._read_agent_device_state()
         lights = state.get("lights") if isinstance(state.get("lights"), dict) else {}
-        speakers = state.get("speakers") if isinstance(state.get("speakers"), dict) else {}
-        if not lights and not speakers:
-            return
-
-        speaker_value = speakers.get(WHOLE_HOME_SPEAKER) if isinstance(speakers, dict) else None
-        if isinstance(speaker_value, dict):
-            speaker_state = str(speaker_value.get("state") or "stop").lower()
-            speaker_track = str(speaker_value.get("track") or "")
-        else:
-            speaker_state = str(speaker_value or "stop").lower()
-            speaker_track = ""
-
-        x0, y0, x1, y1 = image_box
-        width = max(1, x1 - x0)
-        height = max(1, y1 - y0)
-        room_boxes = {
-            "living_room": (0.05, 0.08, 0.48, 0.45, "客厅"),
-            "bedroom": (0.52, 0.08, 0.95, 0.45, "卧室"),
-            "kitchen": (0.05, 0.55, 0.48, 0.92, "厨房"),
-            "bathroom": (0.52, 0.55, 0.95, 0.92, "卫生间"),
-        }
-
-        for room, (rx0, ry0, rx1, ry1, label) in room_boxes.items():
-            target = f"{room}_ceiling_light"
-            light_value = str(lights.get(target, "unknown")).lower()
-
-            left = x0 + int(width * rx0)
-            top = y0 + int(height * ry0)
-            right = x0 + int(width * rx1)
-            bottom = y0 + int(height * ry1)
-            if light_value == "on":
-                fill = "#f4c95d"
-                outline = "#ffe08a"
-                stipple = "gray25"
-                light_text = "灯光 开"
-            elif light_value == "off":
-                fill = "#05070a"
-                outline = "#415166"
-                stipple = "gray50"
-                light_text = "灯光 关"
-            else:
-                fill = "#17212b"
-                outline = "#526476"
-                stipple = "gray75"
-                light_text = "灯光 未设置"
-
-            self.media_canvas.create_rectangle(
-                left,
-                top,
-                right,
-                bottom,
-                fill=fill,
-                outline=outline,
-                width=2,
-                stipple=stipple,
-            )
-            lines = [label, light_text]
-            self.media_canvas.create_text(
-                left + 10,
-                top + 10,
-                text="\n".join(lines),
-                anchor="nw",
-                fill="#f8fafc",
-                font=("Microsoft YaHei UI", 10, "bold"),
-            )
-
-        if speaker_state in {"playing", "play", "on"}:
-            music_text = f"全屋音乐 播放中" + (f"：{speaker_track}" if speaker_track else "")
-        elif speaker_state == "pause":
-            music_text = "全屋音乐 暂停"
-        else:
-            music_text = "全屋音乐 关闭"
-        self.media_canvas.create_text(
-            x0 + 12,
-            y1 - 40,
-            text=music_text,
-            anchor="w",
-            fill="#f8fafc",
-            font=("Microsoft YaHei UI", 10, "bold"),
-        )
+        target = f"{room}_ceiling_light"
+        return apply_light_state_to_image(image, lights.get(target, "on"))
 
     def _draw_media_overlay(self, canvas_w: int, canvas_h: int, image_box: Tuple[int, int, int, int]) -> None:
         phase = self.animation_phase

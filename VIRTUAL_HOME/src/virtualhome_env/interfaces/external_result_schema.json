@@ -17,10 +17,41 @@
     "pet_type": {"type": "string"},
     "pet_count": {"type": "integer", "minimum": 0},
     "stream_id": {"type": "string"},
+    "camera_id": {"type": "integer", "minimum": 0},
     "frame_index": {"type": "integer", "minimum": 0},
     "timestamp": {"type": "number", "minimum": 0},
     "event": {"type": "string"},
+    "heart_rate": {"type": "integer", "minimum": 0},
+    "anxiety_score": {"type": "number", "minimum": 0, "maximum": 1},
+    "health_state": {"type": "string"},
     "detections": {"type": "array"},
+    "room_person_counts": {
+      "type": "object",
+      "additionalProperties": {"type": "integer", "minimum": 0}
+    },
+    "camera_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["room", "stream_id", "camera_id", "person_count"],
+        "properties": {
+          "schema": {"type": "string"},
+          "source": {"type": "string"},
+          "room": {"type": "string"},
+          "stream_id": {"type": "string"},
+          "camera_id": {"type": "integer", "minimum": 0},
+          "person_count": {"type": "integer", "minimum": 0},
+          "known_resident_count": {"type": "integer", "minimum": 0},
+          "unknown_person_count": {"type": "integer", "minimum": 0},
+          "has_person": {"type": "boolean"},
+          "detections": {"type": "array"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "room_camera_results": {"type": "array"},
+    "yolo_camera_results": {"type": "array"},
+    "room_results": {"type": ["array", "object"]},
     "payload": {"type": "object"}
   },
   "additionalProperties": true

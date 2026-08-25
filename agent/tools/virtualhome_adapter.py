@@ -93,6 +93,15 @@ def _count_or_none(value: Any) -> int | None:
         return None
 
 
+def _float_or_none(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _count_from_detections(result: dict[str, Any], labels: set[str]) -> int | None:
     detections = result.get("detections") or result.get("objects")
     if not isinstance(detections, list):
@@ -106,6 +115,116 @@ def _count_from_detections(result: dict[str, Any], labels: set[str]) -> int | No
         if label in labels:
             count += 1
     return count
+
+
+COUNT_SIGNAL_FIELDS = (
+    "person_count",
+    "cat_count",
+    "dog_count",
+    "pet_count",
+    "unknown_person_count",
+    "known_resident_count",
+    "live_object_count",
+)
+BOOL_SIGNAL_FIELDS = (
+    "has_person",
+    "has_cat",
+    "has_dog",
+    "fall_like",
+    "hazard_detected",
+    "health_event",
+    "health_recovered",
+    "unknown_person",
+)
+HEALTH_SIGNAL_FIELDS = ("heart_rate", "anxiety_score", "health_state")
+CAMERA_RESULT_KEYS = ("camera_results", "room_camera_results", "yolo_camera_results")
+
+
+def _room_from_stream_id(stream_id: Any) -> str | None:
+    text = str(stream_id or "").strip().lower().replace("-", "_")
+    if not text:
+        return None
+    for suffix in ("_camera", "_cam", "_stream"):
+        if suffix in text:
+            text = text.split(suffix, 1)[0]
+            break
+    return normalize_room(text)
+
+
+def _merge_camera_result(item: dict[str, Any]) -> dict[str, Any]:
+    result = item.get("result") or item.get("external_result") or item.get("vision_result")
+    merged = copy.deepcopy(result) if isinstance(result, dict) else {}
+    for key, value in item.items():
+        if key not in {"result", "external_result", "vision_result"}:
+            merged.setdefault(key, value)
+    return merged
+
+
+def _iter_camera_results(result: dict[str, Any]):
+    for key in CAMERA_RESULT_KEYS:
+        rows = result.get(key)
+        if not isinstance(rows, list):
+            continue
+        for item in rows:
+            if isinstance(item, dict):
+                yield _merge_camera_result(item)
+
+
+def _iter_room_count_results(result: dict[str, Any]):
+    room_counts = result.get("room_person_counts")
+    if not isinstance(room_counts, dict):
+        return
+    for room_key, count in room_counts.items():
+        room = normalize_room(room_key)
+        if room:
+            yield {
+                "schema": "external.vision_result.v1",
+                "source": result.get("source") or "room_person_counts",
+                "room": room,
+                "person_count": count,
+            }
+
+
+def _iter_room_results(result: dict[str, Any]):
+    rows = result.get("room_results")
+    if isinstance(rows, dict):
+        for room_key, value in rows.items():
+            room = normalize_room(room_key)
+            if not room:
+                continue
+            if isinstance(value, dict):
+                item = copy.deepcopy(value)
+                item.setdefault("room", room)
+            else:
+                item = {"room": room, "person_count": value}
+            item.setdefault("schema", "external.vision_result.v1")
+            item.setdefault("source", result.get("source") or "room_results")
+            yield item
+    elif isinstance(rows, list):
+        for value in rows:
+            if isinstance(value, dict):
+                yield value
+
+
+def _merge_room_signals(target: dict[str, Any], incoming: dict[str, Any]) -> None:
+    for field in COUNT_SIGNAL_FIELDS:
+        target[field] = max(_count_or_none(target.get(field)) or 0, _count_or_none(incoming.get(field)) or 0)
+
+    for field in BOOL_SIGNAL_FIELDS:
+        target[field] = bool(target.get(field) or incoming.get(field))
+
+    if incoming.get("hazard_type"):
+        target["hazard_type"] = incoming.get("hazard_type")
+    for field in HEALTH_SIGNAL_FIELDS:
+        value = incoming.get(field)
+        if value not in (None, ""):
+            target[field] = value
+
+    target["has_person"] = target["has_person"] or target["person_count"] > 0
+    target["has_cat"] = target["has_cat"] or target["cat_count"] > 0
+    target["has_dog"] = target["has_dog"] or target["dog_count"] > 0
+    target["pet_count"] = max(target["pet_count"], target["cat_count"] + target["dog_count"])
+    target["live_object_count"] = max(target["live_object_count"], target["person_count"] + target["pet_count"])
 
 
 class VirtualHomeAdapter:
@@ -214,18 +333,8 @@ class VirtualHomeAdapter:
         feedback = record.get("feedback_sample") or {}
         scene = str(frame.get("scene") or external.get("scene") or feedback.get("scene") or scene)
 
-        rooms = empty_rooms()
-        target_room = normalize_room(external.get("room")) or normalize_room(frame.get("room"))
-        signals = self._signals_from_external_result(external)
         home_mode = self._home_mode()
-        signals = self._apply_home_mode_to_signals(scene, external, signals, home_mode)
-
-        if target_room:
-            rooms[target_room].update(signals)
-        elif any(signals.values()):
-            # Whole-home messages do not locate the object. Keep the signal in a
-            # representative area while preserving the original room in metadata.
-            rooms["living_room"].update(signals)
+        rooms = self._rooms_from_external_result(scene, external, frame, home_mode)
 
         timestamp_ms = int(time.time() * 1000)
         return {
@@ -245,6 +354,44 @@ class VirtualHomeAdapter:
                 "device_state": self.device_state(),
             },
         }
+
+    def _rooms_from_external_result(
+        self,
+        scene: str,
+        external: dict[str, Any],
+        frame: dict[str, Any],
+        home_mode: str,
+    ) -> dict[str, dict[str, Any]]:
+        rooms = empty_rooms()
+        used_room_specific_result = False
+
+        for result in self._iter_room_level_results(external):
+            room = normalize_room(result.get("room")) or _room_from_stream_id(result.get("stream_id"))
+            if not room:
+                continue
+            signals = self._signals_from_external_result(result)
+            signals = self._apply_home_mode_to_signals(scene, result, signals, home_mode)
+            _merge_room_signals(rooms[room], signals)
+            used_room_specific_result = True
+
+        target_room = normalize_room(external.get("room")) or normalize_room(frame.get("room"))
+        top_level_signals = self._signals_from_external_result(external)
+        top_level_signals = self._apply_home_mode_to_signals(scene, external, top_level_signals, home_mode)
+
+        if target_room:
+            _merge_room_signals(rooms[target_room], top_level_signals)
+        elif any(top_level_signals.values()) and not used_room_specific_result:
+            # Whole-home messages do not locate the object. Keep the signal in a
+            # representative area while preserving the original room in metadata.
+            _merge_room_signals(rooms["living_room"], top_level_signals)
+
+        return rooms
+
+    @staticmethod
+    def _iter_room_level_results(external: dict[str, Any]):
+        yield from _iter_camera_results(external)
+        yield from _iter_room_count_results(external)
+        yield from _iter_room_results(external)
 
     def ingest_frame(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Ingest one VirtualHome frame packet and return an agent response."""
@@ -314,7 +461,11 @@ class VirtualHomeAdapter:
         lights = normalized.get("lights") if isinstance(normalized.get("lights"), dict) else {}
         for target, value in LIGHT_DEFAULTS.items():
             lights.setdefault(target, value)
+        for target, raw_value in list(lights.items()):
+            text = str(raw_value or "").strip().lower()
+            lights[target] = "off" if text in {"off", "close", "turn_off", "0", "false"} else "on"
         normalized["lights"] = lights
+        normalized.pop("light_modes", None)
 
         old_speakers = normalized.get("speakers") if isinstance(normalized.get("speakers"), dict) else {}
         speaker = old_speakers.get(WHOLE_HOME_SPEAKER)
@@ -378,6 +529,8 @@ class VirtualHomeAdapter:
         if requested:
             if self._is_health_relief_music_query(requested):
                 return HEALTH_RELIEF_TRACK
+            if not self._normalize_music_query(requested):
+                return tracks[0]["name"] if tracks else ""
             match = self._match_music_track(requested, tracks)
             return match or requested
 
@@ -389,7 +542,7 @@ class VirtualHomeAdapter:
             if match:
                 return match
 
-        return ""
+        return tracks[0]["name"] if tracks else ""
 
     @staticmethod
     def _is_health_relief_music_query(text: str) -> bool:
@@ -426,6 +579,8 @@ class VirtualHomeAdapter:
             "音乐",
             "歌曲",
             "曲目",
+            "歌",
+            "首",
             "音箱",
             "全屋",
             "一下",
@@ -527,7 +682,10 @@ class VirtualHomeAdapter:
                     target=target,
                     value=command,
                     reason="agent_user_light_command",
-                    payload={"source_text": source_text or "", "room_label": ROOM_CN.get(item_room, item_room)},
+                    payload={
+                        "source_text": source_text or "",
+                        "room_label": ROOM_CN.get(item_room, item_room),
+                    },
                 )
                 feedback_items.append(feedback)
                 _append_jsonl(self.feedback_output_file, feedback)
@@ -884,18 +1042,21 @@ class VirtualHomeAdapter:
                         "unknown_person_count": _count_or_none(signals.get("unknown_person_count")) or 0,
                     },
                 )
+            if signals.get("health_recovered"):
+                continue
             if signals.get("health_event"):
                 return (
-                    "set_environment",
-                    f"{room_name}_ambient_light_and_whole_home_music",
-                    "health_support_mode",
+                    "set_device",
+                    WHOLE_HOME_SPEAKER,
+                    "play",
                     "health_event_detected",
                     room_name,
                     {
-                        "light": "cool_blue",
-                        "music": HEALTH_RELIEF_TRACK,
+                        "track": HEALTH_RELIEF_TRACK,
                         "music_scope": "whole_home",
                         "music_source": "health_event",
+                        "heart_rate": signals.get("heart_rate"),
+                        "anxiety_score": signals.get("anxiety_score"),
                     },
                 )
             if (signals.get("has_cat") or signals.get("has_dog")) and not signals.get("has_person"):
@@ -976,9 +1137,6 @@ class VirtualHomeAdapter:
             target = str(feedback.get("target") or f"{room}_environment")
             value = str(feedback.get("value") or "")
             state["environment"][target] = value
-            if payload.get("light"):
-                state["lights"][f"{room}_ceiling_light"] = "on"
-                unity_results.append(self._control_unity_device(room, "light", "on", str(payload.get("light"))))
             if payload.get("music"):
                 music_value = str(payload.get("music") or "").strip()
                 music_command = "stop" if music_value.lower() in {"off", "stop", "false", "0"} else "pause" if music_value.lower() == "pause" else "play"
@@ -1086,6 +1244,10 @@ class VirtualHomeAdapter:
             "hazard_detected": False,
             "hazard_type": "",
             "health_event": False,
+            "health_recovered": False,
+            "heart_rate": 0,
+            "anxiety_score": 0.0,
+            "health_state": "",
             "unknown_person": False,
         }
 
@@ -1173,12 +1335,34 @@ class VirtualHomeAdapter:
 
         payload = result.get("payload") if isinstance(result.get("payload"), dict) else {}
         schema = str(result.get("schema") or "")
-        signals["health_event"] = bool(
+        heart_rate = _count_or_none(payload.get("heart_rate") if "heart_rate" in payload else result.get("heart_rate"))
+        anxiety_score = _float_or_none(payload.get("anxiety_score") if "anxiety_score" in payload else result.get("anxiety_score"))
+        health_state = str(payload.get("health_state") or payload.get("state") or result.get("health_state") or "").strip().lower()
+        if heart_rate is not None:
+            signals["heart_rate"] = heart_rate
+        if anxiety_score is not None:
+            signals["anxiety_score"] = round(anxiety_score, 2)
+        signals["health_state"] = health_state
+
+        has_health_signal = bool(
             schema == "external.health_event.v1"
             or "anxiety" in event
             or "health" in event
             or "heart_rate" in payload
             or "anxiety_score" in payload
+        )
+        signals["health_recovered"] = has_health_signal and (
+            "recover" in event
+            or "recovered" in health_state
+            or health_state in {"calm_recovered", "back_to_normal"}
+        )
+        signals["health_event"] = has_health_signal and not signals["health_recovered"] and (
+            "anxiety" in event
+            or "relief" in event
+            or "anxiety" in health_state
+            or "relief" in health_state
+            or (heart_rate is not None and heart_rate >= 105)
+            or (anxiety_score is not None and anxiety_score >= 0.55)
         )
 
         return signals

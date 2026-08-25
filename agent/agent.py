@@ -187,7 +187,7 @@ class Agent:
             return (
                 "VirtualHome 健康助手检测到情绪或生理状态异常。请根据事件里的 event/payload "
                 "判断更像焦虑、紧张、心率升高还是其他状态，并只输出一段中文建议。"
-                "建议要像情绪健康助手：具体、温和、可执行；可以包含呼吸、灯光、音乐、坐下休息、补水等步骤；"
+                "建议要像情绪健康助手：具体、温和、可执行；可以包含呼吸、音乐、坐下休息、补水等步骤；"
                 "不要说“某人去看看吧”，不要只说报警，不要输出 JSON，不要解释接口。"
                 f"\n健康事件：{json.dumps(event, ensure_ascii=False)}"
             )
@@ -275,7 +275,9 @@ class Agent:
                 room = room_name
                 break
         wants_light = any(token in normalized for token in ("灯", "灯光", "light"))
-        wants_music = any(token in normalized for token in ("音乐", "音箱", "喇叭", "speaker", "music"))
+        music_command_like = any(token in normalized for token in ("播放", "放歌", "来首", "听歌", "play"))
+        wants_music = any(token in normalized for token in ("音乐", "音箱", "喇叭", "歌曲", "曲目", "歌", "speaker", "music", "song"))
+        wants_music = wants_music or (music_command_like and not wants_light)
         if room is None and not wants_music:
             return None
 
@@ -379,7 +381,7 @@ class Agent:
             detail = f"心率约{heart_rate}次/分钟" if heart_rate else "状态有些紧张"
             if anxiety_score not in (None, ""):
                 detail += f"，焦虑评分{anxiety_score}"
-            return f"{room}检测到{detail}。先坐下，把灯光调柔和，跟着 4-7-8 呼吸做三轮，再播放舒缓音乐；如果胸闷或不适持续，就及时联系医生。"
+            return f"{room}检测到{detail}。先坐下，跟着 4-7-8 呼吸做三轮，再播放舒缓音乐；如果胸闷或不适持续，就及时联系医生。"
         if kind == "fall_like":
             return f"{room}有人像是跌倒了，最好马上过去看一下。"
         if kind == "pet_unattended":

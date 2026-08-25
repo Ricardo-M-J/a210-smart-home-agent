@@ -139,6 +139,17 @@
     .metric { border: 1px solid #353535; border-radius: 6px; padding: 6px; background: #181818; }
     .metric b { display: block; font-size: 15px; color: var(--text); }
     .metric span { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+    .health-line {
+      display: none;
+      border: 1px solid #353535;
+      border-radius: 6px;
+      background: #181818;
+      color: var(--muted);
+      padding: 6px;
+      line-height: 1.35;
+    }
+    .health-line.active { display: block; }
+    .health-line b { color: var(--text); }
     .room-status { margin-top: auto; color: var(--ok); line-height: 1.4; }
     .room-tile.alert .room-status { color: var(--alert); }
     .device-list { margin-top: 10px; color: var(--muted); line-height: 1.5; font-size: 12px; }
@@ -295,6 +306,19 @@
       return {person, cat, dog, unknown, otherPet, liveTotal, abnormal};
     }
 
+    function roomHealthText(r) {
+      const heart = Number(r.heart_rate || 0);
+      const anxiety = Number(r.anxiety_score || 0);
+      const state = String(r.health_state || '');
+      if (!heart && !anxiety && !r.health_event && !r.health_recovered) return '';
+      let label = '监测中';
+      if (r.health_recovered || state.includes('recovered')) label = '恢复平和';
+      else if (r.health_event || state.includes('anxiety')) label = '焦虑/缓解中';
+      const heartText = heart ? `${Math.round(heart)} bpm` : '-';
+      const anxietyText = Number.isFinite(anxiety) && anxiety > 0 ? anxiety.toFixed(2) : '-';
+      return `<b>${label}</b> · 心率 ${heartText} · 焦虑 ${anxietyText}`;
+    }
+
     function roomLightText(room, deviceState) {
       const lights = (deviceState && deviceState.lights) || {};
       const value = String(lights[`${room}_ceiling_light`] || 'on').toLowerCase();
@@ -403,6 +427,7 @@
           <div class="metric"><b></b><span>狗</span></div>
           <div class="metric"><b></b><span>陌生人</span></div>
         </div>
+        <div class="health-line"></div>
         <div class="room-status"></div>
       `;
       tile.querySelector('.room-name').textContent = roomCn[room] || room;
@@ -412,6 +437,10 @@
       metrics[0].textContent = stats.cat + (stats.otherPet ? ` +${stats.otherPet}` : '');
       metrics[1].textContent = stats.dog;
       metrics[2].textContent = stats.unknown;
+      const healthLine = tile.querySelector('.health-line');
+      const healthText = roomHealthText(state || {});
+      healthLine.classList.toggle('active', Boolean(healthText));
+      healthLine.innerHTML = healthText;
       tile.querySelector('.room-status').textContent = stats.abnormal.length ? stats.abnormal.join('、') : '状态正常';
       return tile;
     }

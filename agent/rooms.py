@@ -61,6 +61,10 @@ ROOM_FIELDS = (
     "hazard_detected",
     "hazard_type",
     "health_event",
+    "health_recovered",
+    "heart_rate",
+    "anxiety_score",
+    "health_state",
     "unknown_person",
 )
 
@@ -91,6 +95,10 @@ def empty_room_state() -> dict[str, Any]:
         "hazard_detected": False,
         "hazard_type": "",
         "health_event": False,
+        "health_recovered": False,
+        "heart_rate": 0,
+        "anxiety_score": 0.0,
+        "health_state": "",
         "unknown_person": False,
     }
 

@@ -34,6 +34,13 @@ DEFAULT_KITCHEN = ROOM_CAMERA_DIR / "kitchen_normal.png"
 DEFAULT_BEDROOM_WITH_PERSON = REPO_ROOT / "assets" / "demo_sources" / "bedroom_character_source_720p.jpg"
 HEALTH_MUSIC_START = 8.0
 HEALTH_MUSIC_END = 38.0
+ROOMS = ("living_room", "bedroom", "kitchen", "bathroom")
+ROOM_CAMERA_STREAMS = (
+    {"room": "living_room", "stream_id": "livingroom_camera_0", "camera_id": 0},
+    {"room": "bedroom", "stream_id": "bedroom_camera_0", "camera_id": 0},
+    {"room": "kitchen", "stream_id": "kitchen_camera_0", "camera_id": 0},
+    {"room": "bathroom", "stream_id": "bathroom_camera_0", "camera_id": 0},
+)
 
 
 def relative_path(path: Path) -> str:
@@ -62,6 +69,52 @@ def write_jsonl(path: Path, rows: List[Dict[str, object]]) -> None:
     with path.open("w", encoding="utf-8") as file:
         for row in rows:
             file.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def safe_count(value: object, default: int = 0) -> int:
+    try:
+        return max(0, int(float(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def yolo_person_camera_results(
+    scene: str,
+    person_counts: Dict[str, int],
+    frame_index: int,
+    timestamp: float,
+) -> List[Dict[str, object]]:
+    counts = {room: safe_count(person_counts.get(room)) for room in ROOMS}
+    rows: List[Dict[str, object]] = []
+    for camera in ROOM_CAMERA_STREAMS:
+        room = str(camera["room"])
+        person_count = counts[room]
+        rows.append(
+            {
+                "schema": "external.vision_result.v1",
+                "source": "placeholder_yolov11_or_a210",
+                "scene": scene,
+                "room": room,
+                "stream_id": camera["stream_id"],
+                "camera_id": camera["camera_id"],
+                "frame_index": frame_index,
+                "timestamp": timestamp,
+                "person_count": person_count,
+                "known_resident_count": person_count,
+                "unknown_person_count": 0,
+                "has_person": person_count > 0,
+                "detections": [
+                    {
+                        "label": "person",
+                        "class_id": 0,
+                        "confidence": 0.91,
+                        "track_id": f"{camera['stream_id']}_person_{index}",
+                    }
+                    for index in range(person_count)
+                ],
+            }
+        )
+    return rows
 
 
 def frame_manifest_row(
@@ -379,7 +432,7 @@ def generate_relief_audio(path: Path, duration: float = 30.0, sample_rate: int =
 
 def anxiety_state_at(timestamp: float) -> Tuple[int, float, str]:
     if timestamp < 5.0:
-        return 76 + int(math.sin(timestamp * 2.0) * 2), 0.10, "normal_warm"
+        return 76 + int(math.sin(timestamp * 2.0) * 2), 0.10, "calm"
     if timestamp < HEALTH_MUSIC_START:
         progress = smoothstep((timestamp - 5.0) / (HEALTH_MUSIC_START - 5.0))
         heart_rate = int(78 + 40 * progress + math.sin(timestamp * 6.0) * 2)
@@ -390,18 +443,7 @@ def anxiety_state_at(timestamp: float) -> Tuple[int, float, str]:
         heart_rate = int(118 - 35 * progress + math.sin(timestamp * 2.2) * 2)
         anxiety = 0.88 - 0.65 * progress
         return heart_rate, anxiety, "relief_active"
-    return 78 + int(math.sin(timestamp * 2.0) * 2), 0.12, "recovered_warm"
-
-
-def apply_health_environment(frame: np.ndarray, state: str) -> np.ndarray:
-    overlay = frame.copy()
-    if state in {"normal_warm", "recovered_warm"}:
-        overlay[:, :, 1] = np.clip(overlay[:, :, 1].astype(np.int16) + 18, 0, 255)
-        overlay[:, :, 2] = np.clip(overlay[:, :, 2].astype(np.int16) + 42, 0, 255)
-        return alpha_blend_overlay(frame, overlay, 0.18)
-    overlay[:, :, 0] = np.clip(overlay[:, :, 0].astype(np.int16) + 54, 0, 255)
-    overlay[:, :, 1] = np.clip(overlay[:, :, 1].astype(np.int16) + 8, 0, 255)
-    return alpha_blend_overlay(frame, overlay, 0.30)
+    return 78 + int(math.sin(timestamp * 2.0) * 2), 0.12, "calm_recovered"
 
 
 def draw_health_hud(
@@ -411,14 +453,15 @@ def draw_health_hud(
     anxiety_score: float,
     state: str,
 ) -> None:
-    music_on = HEALTH_MUSIC_START <= frame_index / 10.0 < HEALTH_MUSIC_END
-    recovered = state == "recovered_warm"
-    warm_light = state in {"normal_warm", "recovered_warm"}
-    accent = (90, 190, 255) if not warm_light else (80, 210, 245)
+    music_on = frame_index / 10.0 >= HEALTH_MUSIC_START
+    recovered = state == "calm_recovered"
+    accent = (80, 210, 245)
+    if state in {"heart_rate_rising", "anxiety_detected"}:
+        accent = (90, 190, 255)
     if music_on:
         accent = (120, 240, 190)
 
-    state_label = "normal" if state == "normal_warm" else "recovering"
+    state_label = "normal" if state == "calm" else "recovering"
     if state == "heart_rate_rising":
         state_label = "heart-rate rising"
     elif state == "anxiety_detected":
@@ -428,27 +471,30 @@ def draw_health_hud(
     elif recovered:
         state_label = "back to normal"
 
-    light_label = "warm" if warm_light else "cool blue"
     music_label = "ON" if music_on else "OFF"
 
     draw_panel(display, 0, 0, 1280, 112, accent)
-    cv2.putText(display, "Health Assistant | warm -> cool light + music -> warm", (24, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.84, (242, 250, 255), 2)
+    cv2.putText(display, "Health Assistant | calm -> anxiety + music -> calm", (24, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.84, (242, 250, 255), 2)
     cv2.putText(display, f"state={state_label} | HR={heart_rate} bpm | anxiety={anxiety_score:.2f} | music={music_label}", (24, 78), cv2.FONT_HERSHEY_SIMPLEX, 0.76, accent, 2)
 
     draw_panel(display, 884, 136, 366, 286, accent)
     cv2.putText(display, "PHONE / AGENT", (914, 176), cv2.FONT_HERSHEY_SIMPLEX, 0.74, (242, 250, 255), 2)
-    cv2.putText(display, f"Light: {light_label}", (914, 218), cv2.FONT_HERSHEY_SIMPLEX, 0.66, accent, 2)
+    cv2.putText(display, f"State: {state_label}", (914, 218), cv2.FONT_HERSHEY_SIMPLEX, 0.62, accent, 2)
     cv2.putText(display, f"Music: {music_label}", (914, 256), cv2.FONT_HERSHEY_SIMPLEX, 0.66, accent, 2)
+    cv2.putText(display, f"HR {heart_rate} bpm", (914, 292), cv2.FONT_HERSHEY_SIMPLEX, 0.82, accent, 2)
+    cv2.putText(display, f"Anxiety {anxiety_score:.2f}", (914, 330), cv2.FONT_HERSHEY_SIMPLEX, 0.64, (210, 230, 245), 2)
+    hr_ratio = max(0.0, min(1.0, (heart_rate - 72) / 52.0))
+    anxiety_ratio = max(0.0, min(1.0, anxiety_score))
+    cv2.rectangle(display, (914, 346), (1214, 358), (36, 56, 68), -1)
+    cv2.rectangle(display, (914, 346), (914 + int(300 * hr_ratio), 358), accent, -1)
+    cv2.rectangle(display, (914, 366), (1214, 378), (36, 56, 68), -1)
+    cv2.rectangle(display, (914, 366), (914 + int(300 * anxiety_ratio), 378), (130, 180, 255), -1)
     if music_on:
-        cv2.putText(display, "Prompt: 4-7-8 breathing", (914, 296), cv2.FONT_HERSHEY_SIMPLEX, 0.56, (210, 230, 245), 2)
-        cv2.putText(display, "Relax shoulders and neck", (914, 330), cv2.FONT_HERSHEY_SIMPLEX, 0.56, (210, 230, 245), 2)
-        remaining = max(0, int(HEALTH_MUSIC_END - frame_index / 10.0))
-        cv2.putText(display, f"Music ends in {remaining:02d}s", (914, 366), cv2.FONT_HERSHEY_SIMPLEX, 0.56, (120, 240, 190), 2)
+        cv2.putText(display, "Prompt: 4-7-8 breathing", (914, 404), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (210, 230, 245), 2)
     elif recovered:
-        cv2.putText(display, "Prompt: heart rate normal", (914, 296), cv2.FONT_HERSHEY_SIMPLEX, 0.56, (210, 230, 245), 2)
-        cv2.putText(display, "Music stopped", (914, 330), cv2.FONT_HERSHEY_SIMPLEX, 0.56, (210, 230, 245), 2)
+        cv2.putText(display, "Prompt: heart rate normal", (914, 404), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (210, 230, 245), 2)
     else:
-        cv2.putText(display, "Prompt: standby", (914, 296), cv2.FONT_HERSHEY_SIMPLEX, 0.56, (210, 230, 245), 2)
+        cv2.putText(display, "Prompt: standby", (914, 404), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (210, 230, 245), 2)
 
     points = []
     start_x, start_y = 914, 476
@@ -486,11 +532,11 @@ def build_health_event_demo(
     for frame_index in range(total_frames):
         timestamp = round(frame_index / fps, 3)
         heart_rate, anxiety_score, state = anxiety_state_at(timestamp)
-        raw = apply_health_environment(base.copy(), state)
+        raw = base.copy()
         event = "anxiety_detected" if state == "anxiety_detected" else "health_monitoring"
         if state == "relief_active":
             event = "anxiety_relief_active"
-        if state == "recovered_warm":
+        if state == "calm_recovered":
             event = "health_recovered"
 
         external_rows.append(
@@ -502,13 +548,22 @@ def build_health_event_demo(
                 "stream_id": "bedroom_camera_0",
                 "frame_index": frame_index,
                 "timestamp": timestamp,
+                "person_count": 1,
+                "known_resident_count": 1,
+                "room_person_counts": {"living_room": 0, "bedroom": 1, "kitchen": 0, "bathroom": 0},
+                "camera_results": yolo_person_camera_results(
+                    scene="health_event",
+                    person_counts={"bedroom": 1},
+                    frame_index=frame_index,
+                    timestamp=timestamp,
+                ),
                 "event": event,
                 "payload": {
                     "heart_rate": heart_rate,
                     "anxiety_score": anxiety_score,
                     "confidence": 0.91 if state == "anxiety_detected" else 0.84,
-                    "light_state": "warm" if state in {"normal_warm", "recovered_warm"} else "cool_blue",
-                    "music_state": "on" if HEALTH_MUSIC_START <= timestamp < HEALTH_MUSIC_END else "off",
+                    "health_state": state,
+                    "music_state": "on" if timestamp >= HEALTH_MUSIC_START else "off",
                 },
             }
         )
@@ -521,18 +576,20 @@ def build_health_event_demo(
                     "scene": "health_event",
                     "room": "bedroom",
                     "timestamp": timestamp,
-                    "action": "set_environment",
-                    "target": "bedroom_ambient_light_and_whole_home_music",
-                    "value": "anxiety_relief_mode",
+                    "action": "set_device",
+                    "target": "whole_home_speaker",
+                    "value": "play",
                     "reason": "wearable_detected_anxiety_high_heart_rate",
                     "payload": {
-                        "light": "cool_blue",
                         "music": "伊藤サチコ - いつも何度でも",
+                        "track": "伊藤サチコ - いつも何度でも",
                         "music_scope": "whole_home",
                         "music_source": "health_event",
                         "music_path": relative_path(audio_path),
-                        "duration_seconds": HEALTH_MUSIC_END - HEALTH_MUSIC_START,
-                        "agent_message": "检测到心率升高。请跟随 4-7-8 呼吸，放松肩颈，音乐将在 30 秒后自动关闭。",
+                        "music_stop": "agent_command_only",
+                        "heart_rate": heart_rate,
+                        "anxiety_score": anxiety_score,
+                        "agent_message": "检测到心率升高。请跟随 4-7-8 呼吸，放松肩颈；音乐会持续播放，直到在 Agent 端停止。",
                         "agent_interface": "placeholder_feedback_jsonl",
                     },
                 }
@@ -549,7 +606,7 @@ def build_health_event_demo(
                     "payload": {
                         "event": "anxiety_relief_started",
                         "title": "健康助手",
-                        "message": "检测到心率升高。请跟随 4-7-8 呼吸，放松肩颈，音乐将在 30 秒后自动关闭。",
+                        "message": "检测到心率升高。请跟随 4-7-8 呼吸，放松肩颈；音乐会持续播放，直到在 Agent 端停止。",
                         "heart_rate": heart_rate,
                         "anxiety_score": anxiety_score,
                         "mode": "demo_only",
@@ -559,26 +616,6 @@ def build_health_event_demo(
             intervention_sent = True
 
         if timestamp >= HEALTH_MUSIC_END and not recovery_sent:
-            feedback_rows.append(
-                {
-                    "schema": "virtualhome.feedback.v1",
-                    "source": "external_agent",
-                    "scene": "health_event",
-                    "room": "bedroom",
-                    "timestamp": timestamp,
-                    "action": "set_environment",
-                    "target": "bedroom_ambient_light_and_whole_home_music",
-                    "value": "normal_warm_mode",
-                    "reason": "heart_rate_back_to_normal_after_30s_music",
-                    "payload": {
-                        "light": "warm",
-                        "music": "off",
-                        "music_scope": "whole_home",
-                        "music_source": "health_event",
-                        "agent_interface": "placeholder_feedback_jsonl",
-                    },
-                }
-            )
             bluetooth_rows.append(
                 {
                     "schema": "virtualhome.bluetooth_action.v1",
@@ -591,7 +628,7 @@ def build_health_event_demo(
                     "payload": {
                         "event": "anxiety_relief_finished",
                         "title": "健康助手",
-                        "message": "心率已回归正常，音乐关闭，灯光恢复暖色。",
+                        "message": "心率已回归正常；音乐仍跟随 Agent 端控制。",
                         "heart_rate": heart_rate,
                         "anxiety_score": anxiety_score,
                         "mode": "demo_only",
@@ -625,18 +662,17 @@ def build_health_event_demo(
         manifest_name="health_event_frame_manifest.jsonl",
         metadata_name="health_event_metadata.json",
         jpg_quality=jpg_quality,
-        note="Health assistant demo with local playable audio. Real heart-rate, agent text, and phone transport should be integrated by external modules.",
+        note="Health assistant demo with local playable audio and simulated heart-rate/anxiety data. Real wearable data, agent text, and phone transport should be integrated by external modules.",
     )
     outputs["audio"] = audio_path
     metadata_path = outputs["metadata"]
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     metadata["outputs"]["audio"] = relative_path(audio_path)
     metadata["timeline"] = {
-        "normal_warm_until_s": 5.0,
+        "calm_until_s": 5.0,
         "music_start_s": HEALTH_MUSIC_START,
-        "music_end_s": HEALTH_MUSIC_END,
-        "music_duration_s": HEALTH_MUSIC_END - HEALTH_MUSIC_START,
-        "recovered_warm_after_s": HEALTH_MUSIC_END,
+        "music_stop": "agent_command_only",
+        "calm_recovered_after_s": HEALTH_MUSIC_END,
     }
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     return outputs

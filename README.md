@@ -142,7 +142,7 @@ python -c "import sys; print(sys.executable)"
 VIRTUAL_HOME/assets/music/
 ```
 
-当前支持 `mp3` 和 `wav`。Agent 自然语言点歌、停止音乐，以及 06 健康助手样本都会使用这个目录。06 健康助手优先播放 `伊藤サチコ - いつも何度でも.mp3`；如果要替换舒缓音乐，把新文件放到该目录，并在对应脚本或配置中改优先曲目即可。
+当前支持 `.wav`、`.mp3`、`.flac`、`.ogg`、`.m4a`。Agent 自然语言点歌、停止音乐，以及 06 健康助手样本都会使用这个目录。06 健康助手优先播放 `伊藤サチコ - いつも何度でも.mp3`；如果要替换舒缓音乐，把新文件放到该目录，并在对应脚本或配置中改优先曲目即可。
 
 ## 启动项目
 
@@ -209,6 +209,7 @@ Agent 端自然语言控制：
 打开卧室灯
 关闭厨房灯
 打开客厅灯
+播放音乐
 播放 doudou
 停止音乐
 ```
@@ -216,8 +217,10 @@ Agent 端自然语言控制：
 预期现象：
 
 - Agent Web 的四房间状态卡片实时变化，只包含客厅、卧室、厨房、卫生间。
-- VirtualHome 里的灯光通过 Python API 更新。
-- 全屋音乐只从 `VIRTUAL_HOME/assets/music` 播放，不再触发 Unity 内置 TV/radio 声源。
+- VirtualHome 里的灯光通过 Python API 更新；VirtualHome 原生灯具状态只有 `ON/OFF`，本项目不再提供冷暖光/色温控制。
+- 01/02 showcase 面板不再叠加四宫格灯光文字提示；要观察真实房间灯光变化，请先启动 `VirtualHome.exe`，在 showcase 面板点击连接，然后通过 Agent 对话框发送开关灯命令。
+- Agent Web 每个房间卡片只显示房间状态、人数、宠物、异常和灯光开关状态；设备控制通过对话框自然语言完成。
+- 全屋音乐只从 `VIRTUAL_HOME/assets/music` 播放；没有指定曲名时默认播放目录中的第一首，不再触发 Unity 内置 TV/radio 声源。切换 01-07 样本不会重置音乐，只有在 Agent 输入 `停止音乐`、`关闭音乐` 等命令时才停止。
 - `VIRTUAL_HOME/outputs/agent_bridge/simulated_device_state.json` 会记录当前设备状态。
 
 VirtualHome 端样本联动：
@@ -228,11 +231,11 @@ VirtualHome 端样本联动：
 03 人员计数和无人关灯
 04 普通模式宠物留守告警
 05 火灾烟雾报警
-06 健康助手：灯光 + 音乐
+06 健康助手：心率变化 + 音乐
 07 离家模式陌生人告警
 ```
 
-点击 showcase 面板里的 03-07 样本时，面板会把当前样本帧和外部识别结果发送到 Agent 的 `/api/virtualhome/frame`。Agent 终端会输出 `[virtualhome-sync]` 日志；异常事件会在 Agent 对话框里给出日常化提示。
+点击 showcase 面板里的 03-07 样本时，面板会把当前样本帧和外部识别结果发送到 Agent 的 `/api/virtualhome/frame`。每个样本都会附带客厅、卧室、厨房、卫生间四路摄像头的 YOLO 人数检测结果，06 健康助手样本会同步卧室人数和心率/焦虑评分，数据变化为平静 -> 焦虑异常（触发播放音乐）-> 平静。Agent 终端会输出 `[virtualhome-sync]` 日志；异常事件会在 Agent 对话框里给出日常化提示。
 
 基础接口检查：
 
