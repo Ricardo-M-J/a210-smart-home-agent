@@ -1,5 +1,7 @@
 # VirtualHome 智能家居视觉仿真展示
 
+首次克隆本仓库的协作者请先阅读根目录 `README.md` 的“协作者首次配置”。其中写明了 Git LFS、`vhome` 环境、Agent `.env`、以及 GitHub 无法托管的 `VirtualHome_Data/resources.assets.resS` 外部大文件如何恢复。本文件只说明 VirtualHome 侧展示脚本。
+
 本仓库当前只维护 VirtualHome 虚拟环境侧：家居场景展示、房间摄像头图像流、示例事件脚本、反馈动作接口和演示 UI。YOLO、A210 边缘推理、云端大语言模型、真实蓝牙/拨号/短信由外部模块集成。
 
 ## 快速运行
