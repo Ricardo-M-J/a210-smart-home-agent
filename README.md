@@ -54,8 +54,8 @@ VIRTUAL_HOME/windows_exec/windows_exec.v2.2.4/VirtualHome_Data/resources.assets.
 获取方式按优先级选择：
 
 1. 向项目维护者索取团队共享的完整 `windows_exec.v2.2.4` 压缩包，或至少索取 `resources.assets.resS` 这个文件。解压或复制后，确保文件位于上面的精确路径。
-2. 如果拿不到团队包，可以从 VirtualHome 官方 Windows simulator 包获取预编译模拟器。上游仓库 `VIRTUAL_HOME/virtualhome/README.md` 中给出的 Windows 下载入口是 `http://virtual-home.org//release/simulator/v2.0/v2.3.0/windows_exec.zip`。官方版本可能不是本项目验证过的 `v2.2.4`，如果目录名不同，可以改名为 `windows_exec.v2.2.4`，或在单独运行脚本时使用 `--simulator-path` 指向真实的 `VirtualHome.exe`。
-3. 如果需要完全可编辑的模拟器，可以用 `VIRTUAL_HOME/virtualhome_unity_project` 通过 Unity 重新构建 Windows 可执行包，并把构建结果放到 `VIRTUAL_HOME/windows_exec/windows_exec.v2.2.4/`。
+2. 如果拿不到团队包，可以从 VirtualHome 官方下载页获取 `2.2.4` 的 Windows simulator：`http://virtual-home.org/documentation/master/downloads/downloads.html`。下载并解压后，把官方包中的 `windows_exec.v2.2.4` 放到 `VIRTUAL_HOME/windows_exec/` 下，确保最终存在 `VIRTUAL_HOME/windows_exec/windows_exec.v2.2.4/VirtualHome.exe` 和上面的 `resources.assets.resS`。
+3. 如果需要完全可编辑的模拟器，可以用 `VIRTUAL_HOME/virtualhome_unity_project` 通过 Unity 重新构建 Windows 可执行包，并把构建结果放到 `VIRTUAL_HOME/windows_exec/windows_exec.v2.2.4/`。使用unity重新编辑需要用到付费插件，不推荐。这个源码目前没什么用处。
 
 恢复后用下面命令确认：
 
@@ -148,34 +148,48 @@ VIRTUAL_HOME/assets/music/
 
 建议从仓库根目录运行所有命令。
 
-### 1. 启动 VirtualHome.exe
+### 1. 启动下载好的 VirtualHome 模拟器 
 
 ```powershell
 .\VIRTUAL_HOME\windows_exec\windows_exec.v2.2.4\VirtualHome.exe -screen-fullscreen 0 -screen-quality 4 -http-port=8080
 ```
 
-如果出现启动器，选择 Windowed 并点击 `Play!`。Agent 不会自动启动 VirtualHome.exe，它只会连接已经在 `8080` 端口运行的模拟器。
+如果出现启动器，选择 Windowed 并点击 `Play!`。后续 Agent 只会连接已经在 `8080` 端口运行的模拟器。
 
-### 2. 启动 Agent Web
+### 2. 启动 VirtualHome showcase 面板
+
+```powershell
+$env:A210_AGENT_URL="http://127.0.0.1:8019"
+.\VIRTUAL_HOME\vhome\Scripts\python.exe .\VIRTUAL_HOME\src\virtualhome_env\showcase_panel.py
+```
+
+这会打开第一个 UI，也就是 VirtualHome 侧的样本展示面板。面板里的 `Connect API` 会连接第一步已经打开的模拟器。
+
+如果这里提示 `cv2` 无法导入，可以改用 demo 目录里的批处理入口，直接双击：
+
+```text
+VIRTUAL_HOME/demo/virtualhome/02_showcase_panel.bat
+```
+
+或从仓库根目录运行：
+
+```powershell
+.\VIRTUAL_HOME\demo\virtualhome\02_showcase_panel.bat
+```
+
+### 3. 启动 Agent Web
 
 ```powershell
 .\VIRTUAL_HOME\vhome\Scripts\python.exe .\agent\web.py
 ```
 
-浏览器打开：
+这会启动第二个 UI。浏览器打开：
 
 ```text
 http://127.0.0.1:8019
 ```
 
 不要在浏览器里打开 `http://0.0.0.0:8019`。`0.0.0.0` 是服务监听地址，不是访问地址。
-
-### 3. 启动 VirtualHome showcase 面板
-
-```powershell
-$env:A210_AGENT_URL="http://127.0.0.1:8019"
-.\VIRTUAL_HOME\vhome\Scripts\python.exe .\VIRTUAL_HOME\src\virtualhome_env\showcase_panel.py
-```
 
 也可以在 VSCode 里直接运行：
 
@@ -279,8 +293,6 @@ git push origin master
 如果 push 再次出现 `Size must be less than or equal to 2147483648`，说明还有超过 2GB 的单文件进入了提交。先用上面的 `Get-ChildItem` 命令定位，再用 `git rm --cached -- <path>` 从索引移除，并写入 `.gitignore`。
 
 ## 常见问题
-
-`ERR_ADDRESS_INVALID`：浏览器不要访问 `0.0.0.0`，改用 `http://127.0.0.1:8019`。
 
 `cv2` 缺失：确认正在使用 `VIRTUAL_HOME\vhome\Scripts\python.exe`；如果环境损坏，按本文 Python 环境部分重建。
 
